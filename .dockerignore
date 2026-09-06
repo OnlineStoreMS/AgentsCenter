@@ -1,0 +1,13 @@
+node_modules
+web/dist
+web/node_modules
+bin
+.git
+.tmp
+.build
+data
+*.db
+.cursor
+.idea
+.vscode
+*.md
