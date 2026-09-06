@@ -16,6 +16,9 @@ aftersales:
   base_url: "http://localhost:8093"
   internal_token: "change-me-internal-token"
 
+jobs:
+  retention_days: 3
+
 cors:
   allow_origins:
     - "http://localhost:5192"

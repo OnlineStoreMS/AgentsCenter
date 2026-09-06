@@ -973,6 +973,20 @@ func (s *AgentService) DispatchDueAssignments() (int, error) {
 	return 0, nil
 }
 
+// CleanupOldJobs 删除超过 retentionDays 的已结束执行记录；进行中的不删。
+func (s *AgentService) CleanupOldJobs(retentionDays int) (int64, error) {
+	if retentionDays <= 0 {
+		retentionDays = 3
+	}
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
+	res := s.repos.DB.Where(
+		"created_at < ? AND status IN ?",
+		cutoff,
+		[]string{model.JobStatusSucceeded, model.JobStatusFailed, model.JobStatusCancelled},
+	).Delete(&model.AgentJob{})
+	return res.RowsAffected, res.Error
+}
+
 func (s *AgentService) refreshOfflineAgents() {
 	cutoff := time.Now().Add(-onlineWithin)
 	_ = s.repos.DB.Model(&model.Agent{}).

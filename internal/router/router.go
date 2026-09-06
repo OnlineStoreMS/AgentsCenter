@@ -7,6 +7,7 @@ import (
 	"agentscenter/internal/config"
 	jwtmgr "agentscenter/internal/pkg/jwt"
 	"agentscenter/internal/repo"
+	"agentscenter/internal/scheduler"
 	"agentscenter/internal/service"
 	"agentscenter/internalapi"
 
@@ -28,6 +29,8 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	adminH := admin.NewHandlers(svc)
 	agentH := agentapi.NewHandler(svc)
 	internalH := internalapi.NewHandler(svc, cfg.Auth.InternalToken)
+
+	scheduler.NewJobRetentionScheduler(svc, cfg.Jobs.RetentionDays).Start()
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok", "service": "agentscenter"})

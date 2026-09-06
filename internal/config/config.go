@@ -13,6 +13,7 @@ type Config struct {
 	Auth       AuthConfig
 	CORS       CORSConfig
 	AfterSales AfterSalesConfig `mapstructure:"aftersales"`
+	Jobs       JobsConfig       `mapstructure:"jobs"`
 }
 
 type ServerConfig struct {
@@ -35,6 +36,11 @@ type AuthConfig struct {
 type AfterSalesConfig struct {
 	BaseURL       string `mapstructure:"base_url"`
 	InternalToken string `mapstructure:"internal_token"`
+}
+
+type JobsConfig struct {
+	// RetentionDays 执行记录保留天数；默认 3。进行中的 pending/claimed/running 不删。
+	RetentionDays int `mapstructure:"retention_days"`
 }
 
 type CORSConfig struct {
@@ -76,6 +82,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.AfterSales.InternalToken == "" {
 		cfg.AfterSales.InternalToken = cfg.Auth.InternalToken
+	}
+	if cfg.Jobs.RetentionDays <= 0 {
+		cfg.Jobs.RetentionDays = 3
 	}
 	if len(cfg.CORS.AllowOrigins) == 0 {
 		cfg.CORS.AllowOrigins = []string{
