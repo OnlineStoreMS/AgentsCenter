@@ -18,7 +18,7 @@ const menuItems = [
   { path: '/dashboard', title: '工作台', icon: HomeFilled },
   { path: '/agents', title: '执行节点', icon: Monitor },
   { path: '/shops', title: '店铺会话', icon: Shop },
-  { path: '/jobs', title: '任务队列', icon: List },
+  { path: '/jobs', title: '任务', icon: List },
 ]
 
 const logoText = computed(() => (collapsed.value ? 'AG' : 'Agents 中心'))

@@ -268,6 +268,26 @@ func (s *AgentService) ClaimJobs(agent *model.Agent, limit int) ([]dto.JobClaimR
 						continue
 					}
 				}
+				if job.JobType == model.JobTypeDoudianAftersale && !paramsHavePluginCreds(job.ParamsJSON) {
+					if s.aftersales == nil {
+						continue
+					}
+					cred, ferr := s.aftersales.FetchCredential(agent.TenantID, job.Platform, job.PlatformShopID)
+					if ferr != nil {
+						continue
+					}
+					merged, merr := mergeAftersaleParams(job.ParamsJSON, cred)
+					if merr != nil {
+						continue
+					}
+					job.ParamsJSON = merged
+					if job.PlatformShopName == "" {
+						job.PlatformShopName = cred.PlatformShopName
+						if job.PlatformShopName == "" {
+							job.PlatformShopName = cred.ShopName
+						}
+					}
+				}
 				aid := agent.ID
 				job.Status = model.JobStatusClaimed
 				job.AgentID = &aid
@@ -344,30 +364,22 @@ func (s *AgentService) CreateJob(tenantID, userID uint64, in *dto.CreateJobInput
 	paramsJSON := strings.TrimSpace(in.ParamsJSON)
 	shopName := strings.TrimSpace(in.PlatformShopName)
 	if jobType == model.JobTypeDoudianAftersale {
-		existing, err := s.findOpenJob(tenantID, jobType, platform, shopID)
+		existing, err := s.findPendingJob(tenantID, jobType, platform, shopID)
 		if err != nil {
 			return nil, err
 		}
 		if existing != nil {
-			return existing, nil
-		}
-		if !paramsHavePluginCreds(paramsJSON) {
-			cred, err := s.aftersales.FetchCredential(tenantID, platform, shopID)
-			if err != nil {
-				return nil, fmt.Errorf("%w: 拉取售后采集凭证失败: %v", ErrBadRequest, err)
-			}
-			if shopName == "" {
-				shopName = cred.PlatformShopName
-				if shopName == "" {
-					shopName = cred.ShopName
-				}
-			}
-			merged, err := mergeAftersaleParams(paramsJSON, cred)
-			if err != nil {
+			if err := s.refreshAftersaleJobParams(existing, tenantID, platform, shopID, &shopName, paramsJSON); err != nil {
 				return nil, err
 			}
-			paramsJSON = merged
+			return existing, nil
 		}
+		enriched, name, err := s.enrichAftersaleParams(tenantID, platform, shopID, shopName, paramsJSON)
+		if err != nil {
+			return nil, err
+		}
+		paramsJSON = enriched
+		shopName = name
 	}
 
 	job := model.AgentJob{
@@ -388,12 +400,12 @@ func (s *AgentService) CreateJob(tenantID, userID uint64, in *dto.CreateJobInput
 	return &job, nil
 }
 
-func (s *AgentService) findOpenJob(tenantID uint64, jobType, platform, shopID string) (*model.AgentJob, error) {
+// findPendingJob 仅复用尚未被领取的执行单，便于参数更新后重新下发。
+func (s *AgentService) findPendingJob(tenantID uint64, jobType, platform, shopID string) (*model.AgentJob, error) {
 	var job model.AgentJob
 	err := s.repos.DB.Where(
-		"tenant_id = ? AND job_type = ? AND platform = ? AND platform_shop_id = ? AND status IN ?",
-		tenantID, jobType, platform, shopID,
-		[]string{model.JobStatusPending, model.JobStatusClaimed, model.JobStatusRunning},
+		"tenant_id = ? AND job_type = ? AND platform = ? AND platform_shop_id = ? AND status = ?",
+		tenantID, jobType, platform, shopID, model.JobStatusPending,
 	).Order("id desc").First(&job).Error
 	if err == gorm.ErrRecordNotFound {
 		return nil, nil
@@ -402,6 +414,66 @@ func (s *AgentService) findOpenJob(tenantID uint64, jobType, platform, shopID st
 		return nil, err
 	}
 	return &job, nil
+}
+
+func (s *AgentService) enrichAftersaleParams(tenantID uint64, platform, shopID, shopName, paramsJSON string) (string, string, error) {
+	base := strings.TrimSpace(paramsJSON)
+	// 业务 app 创建任务时已带上报地址与凭证：直接采用，中心不做覆盖
+	if paramsHavePluginCreds(base) {
+		return base, shopName, nil
+	}
+	if s.aftersales == nil {
+		return "", shopName, fmt.Errorf("%w: 售后任务缺少采集参数（apiBase/pluginKey/pluginSecret）且无法回源售后", ErrBadRequest)
+	}
+	cred, err := s.aftersales.FetchCredential(tenantID, platform, shopID)
+	if err != nil {
+		return "", shopName, fmt.Errorf("%w: 拉取售后采集凭证失败: %v", ErrBadRequest, err)
+	}
+	if shopName == "" {
+		shopName = cred.PlatformShopName
+		if shopName == "" {
+			shopName = cred.ShopName
+		}
+	}
+	merged, err := mergeAftersaleParams(base, cred)
+	if err != nil {
+		return "", shopName, err
+	}
+	return merged, shopName, nil
+}
+
+// refreshAftersaleJobParams 更新 pending 执行单参数：优先使用业务 app 本次下发的 params。
+func (s *AgentService) refreshAftersaleJobParams(job *model.AgentJob, tenantID uint64, platform, shopID string, shopName *string, incomingParams string) error {
+	name := ""
+	if shopName != nil {
+		name = *shopName
+	}
+	if name == "" {
+		name = job.PlatformShopName
+	}
+	incoming := strings.TrimSpace(incomingParams)
+	if paramsHavePluginCreds(incoming) {
+		job.ParamsJSON = incoming
+		if name != "" {
+			job.PlatformShopName = name
+			if shopName != nil {
+				*shopName = name
+			}
+		}
+		return s.repos.DB.Save(job).Error
+	}
+	enriched, name, err := s.enrichAftersaleParams(tenantID, platform, shopID, name, incoming)
+	if err != nil {
+		return err
+	}
+	job.ParamsJSON = enriched
+	if name != "" {
+		job.PlatformShopName = name
+		if shopName != nil {
+			*shopName = name
+		}
+	}
+	return s.repos.DB.Save(job).Error
 }
 
 func mergeAftersaleParams(existing string, cred *AfterSalesCredential) (string, error) {
@@ -597,10 +669,308 @@ func (s *AgentService) ListJobs(tenantID uint64, page, pageSize int, status, job
 
 func (s *AgentService) SkillCatalog() []dto.SkillCatalogItem {
 	return []dto.SkillCatalogItem{
-		{ID: model.JobTypeDoudianAftersale, Name: "抖店售后单抓取", Platform: model.PlatformDoudian, Description: "抓取抖店售后工作台数据并回传售后中心"},
-		{ID: model.JobTypeDoudianDecryptPhone, Name: "抖店订单解密真实手机号", Platform: model.PlatformDoudian, Description: "在已登录抖店后台申请查看真实收件手机号"},
-		{ID: model.JobTypeKdzsRemotePrint, Name: "快递助手远程打单", Platform: model.PlatformDoudian, Description: "快递助手桌面端远程打单（Shipping 下发）"},
+		{
+			ID:                     model.JobTypeDoudianAftersale,
+			Name:                   "抖店售后单抓取",
+			Platform:               model.PlatformDoudian,
+            Description:            "抓取抖店售后工作台；上报地址与凭证由售后中心创建任务时写入 params",
+			RunPolicies:            []string{model.RunPolicyInterval, model.RunPolicyOnDemand},
+			DefaultIntervalMinutes: 30,
+		},
+		{
+			ID:          model.JobTypeDoudianDecryptPhone,
+			Name:        "抖店订单解密真实手机号",
+			Platform:    model.PlatformDoudian,
+			Description: "在已登录抖店后台申请查看真实收件手机号",
+			RunPolicies: []string{model.RunPolicyOnDemand},
+		},
+		{
+			ID:          model.JobTypeKdzsRemotePrint,
+			Name:        "快递助手远程打单",
+			Platform:    model.PlatformDoudian,
+			Description: "快递助手桌面端远程打单（Shipping 下发）",
+			RunPolicies: []string{model.RunPolicyOnDemand},
+		},
 	}
+}
+
+func (s *AgentService) skillByID(id string) *dto.SkillCatalogItem {
+	for _, sk := range s.SkillCatalog() {
+		if sk.ID == id {
+			cp := sk
+			return &cp
+		}
+	}
+	return nil
+}
+
+func skillSupports(sk *dto.SkillCatalogItem, policy string) bool {
+	if sk == nil {
+		return false
+	}
+	for _, p := range sk.RunPolicies {
+		if p == policy {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *AgentService) ListAssignments(tenantID uint64, page, pageSize int, jobType string) ([]dto.AssignmentListItem, int64, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	q := s.repos.DB.Model(&model.TaskAssignment{}).Where("tenant_id = ?", tenantID)
+	if jt := strings.TrimSpace(jobType); jt != "" {
+		q = q.Where("job_type = ?", jt)
+	}
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []model.TaskAssignment
+	if err := q.Order("id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	nameByID := map[string]string{}
+	for _, sk := range s.SkillCatalog() {
+		nameByID[sk.ID] = sk.Name
+	}
+	out := make([]dto.AssignmentListItem, 0, len(rows))
+	for _, a := range rows {
+		item := dto.AssignmentListItem{
+			ID:               a.ID,
+			JobType:          a.JobType,
+			JobTypeName:      nameByID[a.JobType],
+			Platform:         a.Platform,
+			PlatformShopID:   a.PlatformShopID,
+			PlatformShopName: a.PlatformShopName,
+			Enabled:          a.Enabled,
+			RunPolicy:        a.RunPolicy,
+			IntervalMinutes:  a.IntervalMinutes,
+			CreatedAt:        a.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:        a.UpdatedAt.Format(time.RFC3339),
+		}
+		if a.LastEnqueuedAt != nil {
+			t := a.LastEnqueuedAt.Format(time.RFC3339)
+			item.LastEnqueuedAt = &t
+		}
+		if a.NextRunAt != nil {
+			t := a.NextRunAt.Format(time.RFC3339)
+			item.NextRunAt = &t
+		}
+		out = append(out, item)
+	}
+	return out, total, nil
+}
+
+func (s *AgentService) UpsertAssignment(tenantID, userID uint64, in *dto.UpsertAssignmentInput) (*model.TaskAssignment, *model.AgentJob, error) {
+	jobType := strings.TrimSpace(in.JobType)
+	platform := strings.TrimSpace(in.Platform)
+	shopID := strings.TrimSpace(in.PlatformShopID)
+	if jobType == "" || platform == "" || shopID == "" {
+		return nil, nil, fmt.Errorf("%w: jobType/platform/platformShopId 必填", ErrBadRequest)
+	}
+	sk := s.skillByID(jobType)
+	if sk == nil {
+		return nil, nil, fmt.Errorf("%w: 未知任务类型 %s", ErrBadRequest, jobType)
+	}
+
+	runPolicy := strings.TrimSpace(in.RunPolicy)
+	if runPolicy == "" {
+		if skillSupports(sk, model.RunPolicyInterval) {
+			runPolicy = model.RunPolicyInterval
+		} else {
+			runPolicy = model.RunPolicyOnDemand
+		}
+	}
+	if !skillSupports(sk, runPolicy) {
+		return nil, nil, fmt.Errorf("%w: 技能 %s 不支持运行策略 %s", ErrBadRequest, jobType, runPolicy)
+	}
+
+	var interval *int
+	if runPolicy == model.RunPolicyInterval {
+		mins := sk.DefaultIntervalMinutes
+		if mins <= 0 {
+			mins = 30
+		}
+		if in.IntervalMinutes != nil && *in.IntervalMinutes > 0 {
+			mins = *in.IntervalMinutes
+		}
+		interval = &mins
+	}
+
+	enabled := true
+	if in.Enabled != nil {
+		enabled = *in.Enabled
+	}
+
+	var row model.TaskAssignment
+	err := s.repos.DB.Where(
+		"tenant_id = ? AND job_type = ? AND platform = ? AND platform_shop_id = ?",
+		tenantID, jobType, platform, shopID,
+	).First(&row).Error
+	now := time.Now()
+	if err == gorm.ErrRecordNotFound {
+		row = model.TaskAssignment{
+			TenantID:         tenantID,
+			JobType:          jobType,
+			Platform:         platform,
+			PlatformShopID:   shopID,
+			PlatformShopName: strings.TrimSpace(in.PlatformShopName),
+			Enabled:          enabled,
+			RunPolicy:        runPolicy,
+			IntervalMinutes:  interval,
+			CreatedBy:        userID,
+		}
+		if enabled && runPolicy == model.RunPolicyInterval {
+			// 若立即触发，调度器从下一次间隔开始；否则尽快由调度器领取
+			if in.TriggerNow {
+				next := now.Add(time.Duration(*interval) * time.Minute)
+				row.NextRunAt = &next
+			} else {
+				row.NextRunAt = &now
+			}
+		}
+		if err := s.repos.DB.Create(&row).Error; err != nil {
+			return nil, nil, err
+		}
+	} else if err != nil {
+		return nil, nil, err
+	} else {
+		prevInterval := 0
+		if row.IntervalMinutes != nil {
+			prevInterval = *row.IntervalMinutes
+		}
+		row.Enabled = enabled
+		row.RunPolicy = runPolicy
+		row.IntervalMinutes = interval
+		if v := strings.TrimSpace(in.PlatformShopName); v != "" {
+			row.PlatformShopName = v
+		}
+		if enabled && runPolicy == model.RunPolicyInterval && interval != nil {
+			// 间隔或参数变更时重算下次执行时间
+			intervalChanged := in.IntervalMinutes != nil && *interval != prevInterval
+			if row.NextRunAt == nil || intervalChanged || strings.TrimSpace(in.ParamsJSON) != "" {
+				next := now.Add(time.Duration(*interval) * time.Minute)
+				if !intervalChanged && row.LastEnqueuedAt != nil {
+					cand := row.LastEnqueuedAt.Add(time.Duration(*interval) * time.Minute)
+					if cand.After(now) {
+						next = cand
+					} else {
+						next = now
+					}
+				}
+				if in.TriggerNow {
+					next = now.Add(time.Duration(*interval) * time.Minute)
+				}
+				row.NextRunAt = &next
+			}
+		} else {
+			row.NextRunAt = nil
+		}
+		if err := s.repos.DB.Save(&row).Error; err != nil {
+			return nil, nil, err
+		}
+	}
+
+	var job *model.AgentJob
+	if in.TriggerNow {
+		var err error
+		job, err = s.triggerAssignmentLocked(&row, userID, in.ParamsJSON, in.Source, in.Priority)
+		if err != nil {
+			return &row, nil, err
+		}
+	} else if jobType == model.JobTypeDoudianAftersale && strings.TrimSpace(in.ParamsJSON) != "" {
+		// 参数变更：同步刷新尚未领取的执行单，下一次领取即用新参数
+		if pending, err := s.findPendingJob(tenantID, jobType, platform, shopID); err == nil && pending != nil {
+			name := strings.TrimSpace(in.PlatformShopName)
+			_ = s.refreshAftersaleJobParams(pending, tenantID, platform, shopID, &name, in.ParamsJSON)
+		}
+	}
+	return &row, job, nil
+}
+
+func (s *AgentService) TriggerAssignment(tenantID, userID, assignmentID uint64, in *dto.TriggerAssignmentInput) (*model.AgentJob, error) {
+	var row model.TaskAssignment
+	if err := s.repos.DB.Where("id = ? AND tenant_id = ?", assignmentID, tenantID).First(&row).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if !row.Enabled {
+		return nil, fmt.Errorf("%w: 订阅已停用", ErrBadRequest)
+	}
+	params := ""
+	source := "manual"
+	priority := 100
+	if in != nil {
+		params = in.ParamsJSON
+		if strings.TrimSpace(in.Source) != "" {
+			source = in.Source
+		}
+		if in.Priority > 0 {
+			priority = in.Priority
+		}
+	}
+	return s.triggerAssignmentLocked(&row, userID, params, source, priority)
+}
+
+func (s *AgentService) SetAssignmentEnabled(tenantID, assignmentID uint64, enabled bool) (*model.TaskAssignment, error) {
+	var row model.TaskAssignment
+	if err := s.repos.DB.Where("id = ? AND tenant_id = ?", assignmentID, tenantID).First(&row).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	row.Enabled = enabled
+	if enabled && row.RunPolicy == model.RunPolicyInterval && row.IntervalMinutes != nil && *row.IntervalMinutes > 0 {
+		now := time.Now()
+		if row.NextRunAt == nil || row.NextRunAt.Before(now) {
+			row.NextRunAt = &now
+		}
+	}
+	if err := s.repos.DB.Save(&row).Error; err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+func (s *AgentService) triggerAssignmentLocked(row *model.TaskAssignment, userID uint64, paramsJSON, source string, priority int) (*model.AgentJob, error) {
+	if source == "" {
+		source = "manual"
+	}
+	job, err := s.CreateJob(row.TenantID, userID, &dto.CreateJobInput{
+		JobType:          row.JobType,
+		Platform:         row.Platform,
+		PlatformShopID:   row.PlatformShopID,
+		PlatformShopName: row.PlatformShopName,
+		ParamsJSON:       paramsJSON,
+		Source:           source,
+		Priority:         priority,
+	})
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	row.LastEnqueuedAt = &now
+	if row.RunPolicy == model.RunPolicyInterval && row.IntervalMinutes != nil && *row.IntervalMinutes > 0 {
+		next := now.Add(time.Duration(*row.IntervalMinutes) * time.Minute)
+		row.NextRunAt = &next
+	}
+	_ = s.repos.DB.Save(row).Error
+	return job, nil
+}
+
+// DispatchDueAssignments 已废弃：定时间隔由业务 app（如售后）触发下发。
+// 保留空实现以免旧调用方编译失败。
+func (s *AgentService) DispatchDueAssignments() (int, error) {
+	return 0, nil
 }
 
 func (s *AgentService) refreshOfflineAgents() {

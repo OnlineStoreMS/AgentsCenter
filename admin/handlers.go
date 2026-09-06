@@ -29,6 +29,11 @@ func RegisterRoutes(g *gin.RouterGroup, h *Handlers) {
 
 	g.GET("/jobs", h.ListJobs)
 	g.POST("/jobs", h.CreateJob)
+
+	g.GET("/assignments", h.ListAssignments)
+	g.POST("/assignments", h.UpsertAssignment)
+	g.POST("/assignments/:id/trigger", h.TriggerAssignment)
+	g.PUT("/assignments/:id/enabled", h.SetAssignmentEnabled)
 }
 
 func (h *Handlers) DashboardStats(c *gin.Context) {
@@ -104,4 +109,65 @@ func (h *Handlers) CreateJob(c *gin.Context) {
 		return
 	}
 	response.Created(c, job)
+}
+
+func (h *Handlers) ListAssignments(c *gin.Context) {
+	page, pageSize := httputil.ParsePage(c)
+	list, total, err := h.svc.ListAssignments(authcontext.TenantID(c), page, pageSize, c.Query("jobType"))
+	if err != nil {
+		httputil.HandleServiceError(c, err)
+		return
+	}
+	response.OK(c, response.PageResult(list, total, page, pageSize))
+}
+
+func (h *Handlers) UpsertAssignment(c *gin.Context) {
+	var in dto.UpsertAssignmentInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	row, job, err := h.svc.UpsertAssignment(authcontext.TenantID(c), authcontext.UserID(c), &in)
+	if err != nil {
+		httputil.HandleServiceError(c, err)
+		return
+	}
+	response.Created(c, gin.H{"assignment": row, "job": job})
+}
+
+func (h *Handlers) TriggerAssignment(c *gin.Context) {
+	id, err := httputil.ParseID(c)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var in dto.TriggerAssignmentInput
+	_ = c.ShouldBindJSON(&in)
+	job, err := h.svc.TriggerAssignment(authcontext.TenantID(c), authcontext.UserID(c), id, &in)
+	if err != nil {
+		httputil.HandleServiceError(c, err)
+		return
+	}
+	response.OK(c, job)
+}
+
+func (h *Handlers) SetAssignmentEnabled(c *gin.Context) {
+	id, err := httputil.ParseID(c)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	row, err := h.svc.SetAssignmentEnabled(authcontext.TenantID(c), id, body.Enabled)
+	if err != nil {
+		httputil.HandleServiceError(c, err)
+		return
+	}
+	response.OK(c, row)
 }

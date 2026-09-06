@@ -86,4 +86,28 @@ const (
 	JobTypeDoudianAftersale     = "doudian.aftersale"
 	JobTypeDoudianDecryptPhone  = "doudian.order.decrypt-phone"
 	JobTypeKdzsRemotePrint      = "kdzs.remote.print"
+
+	RunPolicyInterval = "interval"
+	RunPolicyOnDemand = "on_demand"
+	RunPolicyDaily    = "daily" // reserved
 )
+
+// TaskAssignment 店铺 × 技能的长期订阅（运行周期）；每次下发仍创建 AgentJob 执行单。
+type TaskAssignment struct {
+	ID               uint64     `gorm:"primaryKey" json:"id"`
+	TenantID         uint64     `gorm:"uniqueIndex:uniq_assignment;not null;default:1" json:"tenantId"`
+	JobType          string     `gorm:"size:64;uniqueIndex:uniq_assignment;not null" json:"jobType"`
+	Platform         string     `gorm:"size:32;uniqueIndex:uniq_assignment;not null" json:"platform"`
+	PlatformShopID   string     `gorm:"size:128;uniqueIndex:uniq_assignment;not null" json:"platformShopId"`
+	PlatformShopName string     `gorm:"size:256" json:"platformShopName"`
+	Enabled          bool       `gorm:"not null;default:true" json:"enabled"`
+	RunPolicy        string     `gorm:"size:32;not null;default:on_demand" json:"runPolicy"` // interval/on_demand
+	IntervalMinutes  *int       `json:"intervalMinutes"`
+	LastEnqueuedAt   *time.Time `json:"lastEnqueuedAt"`
+	NextRunAt        *time.Time `json:"nextRunAt"`
+	CreatedBy        uint64     `json:"createdBy"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
+}
+
+func (TaskAssignment) TableName() string { return "task_assignments" }

@@ -68,3 +68,61 @@ func (h *Handler) ListShops(c *gin.Context) {
 	}
 	response.OK(c, response.PageResult(list, total, page, pageSize))
 }
+
+func (h *Handler) UpsertAssignment(c *gin.Context) {
+	var in dto.InternalUpsertAssignmentInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	row, job, err := h.svc.UpsertAssignment(in.TenantID, 0, &dto.UpsertAssignmentInput{
+		JobType:          in.JobType,
+		Platform:         in.Platform,
+		PlatformShopID:   in.PlatformShopID,
+		PlatformShopName: in.PlatformShopName,
+		Enabled:          in.Enabled,
+		RunPolicy:        in.RunPolicy,
+		IntervalMinutes:  in.IntervalMinutes,
+		TriggerNow:       in.TriggerNow,
+		ParamsJSON:       in.ParamsJSON,
+		Source:           in.Source,
+		Priority:         in.Priority,
+	})
+	if err != nil {
+		httputil.HandleServiceError(c, err)
+		return
+	}
+	response.Created(c, gin.H{"assignment": row, "job": job})
+}
+
+// TriggerByShop 按店铺+技能立即创建执行单（会先确保订阅存在）。
+func (h *Handler) TriggerByShop(c *gin.Context) {
+	var in dto.InternalUpsertAssignmentInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	in.TriggerNow = true
+	if in.Enabled == nil {
+		t := true
+		in.Enabled = &t
+	}
+	row, job, err := h.svc.UpsertAssignment(in.TenantID, 0, &dto.UpsertAssignmentInput{
+		JobType:          in.JobType,
+		Platform:         in.Platform,
+		PlatformShopID:   in.PlatformShopID,
+		PlatformShopName: in.PlatformShopName,
+		Enabled:          in.Enabled,
+		RunPolicy:        in.RunPolicy,
+		IntervalMinutes:  in.IntervalMinutes,
+		TriggerNow:       true,
+		ParamsJSON:       in.ParamsJSON,
+		Source:           in.Source,
+		Priority:         in.Priority,
+	})
+	if err != nil {
+		httputil.HandleServiceError(c, err)
+		return
+	}
+	response.OK(c, gin.H{"assignment": row, "job": job})
+}

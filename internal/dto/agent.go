@@ -133,8 +133,61 @@ type JobListItem struct {
 }
 
 type SkillCatalogItem struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Platform    string `json:"platform"`
-	Description string `json:"description"`
+	ID                     string   `json:"id"`
+	Name                   string   `json:"name"`
+	Platform               string   `json:"platform"`
+	Description            string   `json:"description"`
+	RunPolicies            []string `json:"runPolicies"`
+	DefaultIntervalMinutes int      `json:"defaultIntervalMinutes,omitempty"`
+}
+
+type UpsertAssignmentInput struct {
+	JobType          string `json:"jobType" binding:"required"`
+	Platform         string `json:"platform" binding:"required"`
+	PlatformShopID   string `json:"platformShopId" binding:"required"`
+	PlatformShopName string `json:"platformShopName"`
+	Enabled          *bool  `json:"enabled"`
+	RunPolicy        string `json:"runPolicy"` // interval | on_demand；空则按技能默认
+	IntervalMinutes  *int   `json:"intervalMinutes"`
+	TriggerNow       bool   `json:"triggerNow"`
+	ParamsJSON       string `json:"paramsJson"`
+	Source           string `json:"source"`
+	Priority         int    `json:"priority"`
+}
+
+type InternalUpsertAssignmentInput struct {
+	TenantID         uint64 `json:"tenantId" binding:"required"`
+	JobType          string `json:"jobType" binding:"required"`
+	Platform         string `json:"platform" binding:"required"`
+	PlatformShopID   string `json:"platformShopId" binding:"required"`
+	PlatformShopName string `json:"platformShopName"`
+	Enabled          *bool  `json:"enabled"`
+	RunPolicy        string `json:"runPolicy"`
+	IntervalMinutes  *int   `json:"intervalMinutes"`
+	TriggerNow       bool   `json:"triggerNow"`
+	ParamsJSON       string `json:"paramsJson"`
+	Source           string `json:"source"`
+	Priority         int    `json:"priority"`
+}
+
+type TriggerAssignmentInput struct {
+	ParamsJSON string `json:"paramsJson"`
+	Source     string `json:"source"`
+	Priority   int    `json:"priority"`
+}
+
+type AssignmentListItem struct {
+	ID               uint64  `json:"id"`
+	JobType          string  `json:"jobType"`
+	JobTypeName      string  `json:"jobTypeName"`
+	Platform         string  `json:"platform"`
+	PlatformShopID   string  `json:"platformShopId"`
+	PlatformShopName string  `json:"platformShopName"`
+	Enabled          bool    `json:"enabled"`
+	RunPolicy        string  `json:"runPolicy"`
+	IntervalMinutes  *int    `json:"intervalMinutes"`
+	LastEnqueuedAt   *string `json:"lastEnqueuedAt"`
+	NextRunAt        *string `json:"nextRunAt"`
+	CreatedAt        string  `json:"createdAt"`
+	UpdatedAt        string  `json:"updatedAt"`
 }

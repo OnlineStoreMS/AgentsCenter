@@ -25,7 +25,7 @@ const router = createRouter({
         { path: 'dashboard', name: 'Dashboard', component: () => import('../views/Dashboard.vue'), meta: { title: '工作台' } },
         { path: 'agents', name: 'Agents', component: () => import('../views/Agents.vue'), meta: { title: '执行节点' } },
         { path: 'shops', name: 'Shops', component: () => import('../views/Shops.vue'), meta: { title: '店铺会话' } },
-        { path: 'jobs', name: 'Jobs', component: () => import('../views/Jobs.vue'), meta: { title: '任务队列' } },
+        { path: 'jobs', name: 'Jobs', component: () => import('../views/Jobs.vue'), meta: { title: '任务' } },
       ],
     },
   ],

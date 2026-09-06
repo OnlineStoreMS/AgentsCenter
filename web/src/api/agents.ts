@@ -65,6 +65,24 @@ export interface SkillItem {
   name: string
   platform: string
   description: string
+  runPolicies: string[]
+  defaultIntervalMinutes?: number
+}
+
+export interface AssignmentItem {
+  id: number
+  jobType: string
+  jobTypeName: string
+  platform: string
+  platformShopId: string
+  platformShopName: string
+  enabled: boolean
+  runPolicy: string
+  intervalMinutes?: number | null
+  lastEnqueuedAt?: string | null
+  nextRunAt?: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 export async function fetchDashboardStats() {
@@ -97,4 +115,32 @@ export async function createJob(body: {
 
 export async function listSkills() {
   return unwrap<SkillItem[]>(await http.get('/skills'))
+}
+
+export async function listAssignments(params: { page?: number; pageSize?: number; jobType?: string }) {
+  return unwrap<PageData<AssignmentItem>>(await http.get('/assignments', { params }))
+}
+
+export async function upsertAssignment(body: {
+  jobType: string
+  platform: string
+  platformShopId: string
+  platformShopName?: string
+  enabled?: boolean
+  runPolicy?: string
+  intervalMinutes?: number
+  triggerNow?: boolean
+  paramsJson?: string
+  source?: string
+  priority?: number
+}) {
+  return unwrap(await http.post('/assignments', body))
+}
+
+export async function triggerAssignment(id: number, body?: { paramsJson?: string; source?: string }) {
+  return unwrap(await http.post(`/assignments/${id}/trigger`, body || {}))
+}
+
+export async function setAssignmentEnabled(id: number, enabled: boolean) {
+  return unwrap(await http.put(`/assignments/${id}/enabled`, { enabled }))
 }
