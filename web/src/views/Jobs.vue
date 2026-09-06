@@ -244,7 +244,7 @@ onMounted(load)
     </div>
 
     <el-tabs v-model="tab">
-      <el-tab-pane label="任务（可反复执行）" name="assignments">
+      <el-tab-pane label="任务" name="assignments">
         <el-table :data="assignments" v-loading="assignLoading" stripe>
           <el-table-column prop="id" label="ID" width="70" />
           <el-table-column label="任务" min-width="160">
