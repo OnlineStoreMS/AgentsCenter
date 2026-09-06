@@ -8,10 +8,11 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	Auth     AuthConfig
-	CORS     CORSConfig
+	Server     ServerConfig
+	Database   DatabaseConfig
+	Auth       AuthConfig
+	CORS       CORSConfig
+	AfterSales AfterSalesConfig `mapstructure:"aftersales"`
 }
 
 type ServerConfig struct {
@@ -26,8 +27,14 @@ type DatabaseConfig struct {
 }
 
 type AuthConfig struct {
-	Enabled   bool
-	JWTSecret string `mapstructure:"jwt_secret"`
+	Enabled       bool
+	JWTSecret     string `mapstructure:"jwt_secret"`
+	InternalToken string `mapstructure:"internal_token"`
+}
+
+type AfterSalesConfig struct {
+	BaseURL       string `mapstructure:"base_url"`
+	InternalToken string `mapstructure:"internal_token"`
 }
 
 type CORSConfig struct {
@@ -60,6 +67,15 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Auth.JWTSecret == "" {
 		cfg.Auth.JWTSecret = "change-me-in-production-use-long-random-string"
+	}
+	if cfg.Auth.InternalToken == "" {
+		cfg.Auth.InternalToken = cfg.Auth.JWTSecret
+	}
+	if cfg.AfterSales.BaseURL == "" {
+		cfg.AfterSales.BaseURL = "http://localhost:5176"
+	}
+	if cfg.AfterSales.InternalToken == "" {
+		cfg.AfterSales.InternalToken = cfg.Auth.InternalToken
 	}
 	if len(cfg.CORS.AllowOrigins) == 0 {
 		cfg.CORS.AllowOrigins = []string{

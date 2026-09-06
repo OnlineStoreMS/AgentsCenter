@@ -67,18 +67,38 @@ type CreateJobInput struct {
 	Priority         int    `json:"priority"`
 }
 
+type InternalCreateJobInput struct {
+	TenantID         uint64 `json:"tenantId" binding:"required"`
+	JobType          string `json:"jobType" binding:"required"`
+	Platform         string `json:"platform" binding:"required"`
+	PlatformShopID   string `json:"platformShopId" binding:"required"`
+	PlatformShopName string `json:"platformShopName"`
+	ParamsJSON       string `json:"paramsJson"`
+	Source           string `json:"source"`
+	Priority         int    `json:"priority"`
+}
+
 type AgentListItem struct {
-	ID            uint64  `json:"id"`
-	MachineID     string  `json:"machineId"`
-	Name          string  `json:"name"`
-	Hostname      string  `json:"hostname"`
-	OS            string  `json:"os"`
-	AgentVersion  string  `json:"agentVersion"`
-	Status        string  `json:"status"`
-	SkillsJSON    string  `json:"skillsJson"`
-	ShopCount     int64   `json:"shopCount"`
-	LastHeartbeat *string `json:"lastHeartbeat"`
-	CreatedAt     string  `json:"createdAt"`
+	ID            uint64           `json:"id"`
+	MachineID     string           `json:"machineId"`
+	Name          string           `json:"name"`
+	Hostname      string           `json:"hostname"`
+	OS            string           `json:"os"`
+	AgentVersion  string           `json:"agentVersion"`
+	Status        string           `json:"status"`
+	SkillsJSON    string           `json:"skillsJson"`
+	ShopCount     int64            `json:"shopCount"`
+	Shops         []AgentShopBrief `json:"shops"`
+	LastHeartbeat *string          `json:"lastHeartbeat"`
+	CreatedAt     string           `json:"createdAt"`
+}
+
+type AgentShopBrief struct {
+	Platform         string `json:"platform"`
+	PlatformShopID   string `json:"platformShopId"`
+	PlatformShopName string `json:"platformShopName"`
+	BrowserChannel   string `json:"browserChannel"`
+	Status           string `json:"status"`
 }
 
 type ShopListItem struct {

@@ -18,6 +18,13 @@ export interface AgentItem {
   status: string
   skillsJson: string
   shopCount: number
+  shops?: Array<{
+    platform: string
+    platformShopId: string
+    platformShopName: string
+    browserChannel: string
+    status: string
+  }>
   lastHeartbeat?: string
   createdAt: string
 }

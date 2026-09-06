@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { createJob, listJobs, listSkills, type JobItem, type SkillItem } from '../api/agents'
+import { createJob, listJobs, listShops, listSkills, type JobItem, type ShopItem, type SkillItem } from '../api/agents'
 
 const route = useRoute()
 const loading = ref(false)
@@ -12,16 +12,29 @@ const page = ref(1)
 const pageSize = ref(20)
 const status = ref((route.query.status as string) || '')
 const skills = ref<SkillItem[]>([])
+const shops = ref<ShopItem[]>([])
 const dialog = ref(false)
 const form = reactive({
-  jobType: 'doudian.order.decrypt-phone',
+  jobType: 'doudian.aftersale',
   platform: 'doudian',
   platformShopId: '',
   platformShopName: '',
-  paramsJson: '{\n  "orderNo": "",\n  "browserChannel": "msedge"\n}',
+  orderNo: '',
+  browserChannel: '',
   source: 'manual',
   priority: 100,
 })
+
+const selectedShop = computed(() =>
+  shops.value.find(
+    (s) => s.platform === form.platform && s.platformShopId === form.platformShopId,
+  ),
+)
+
+const needsOrderNo = computed(() => form.jobType === 'doudian.order.decrypt-phone')
+const needsParamsJson = computed(
+  () => form.jobType !== 'doudian.aftersale' && form.jobType !== 'doudian.order.decrypt-phone',
+)
 
 async function load() {
   loading.value = true
@@ -42,22 +55,77 @@ async function load() {
 
 async function openCreate() {
   try {
-    skills.value = (await listSkills()) || []
+    const [sk, sh] = await Promise.all([
+      listSkills(),
+      listShops({ page: 1, pageSize: 200 }),
+    ])
+    skills.value = sk || []
+    shops.value = sh?.list || []
   } catch {
     skills.value = []
+    shops.value = []
   }
+  form.jobType = skills.value[0]?.id || 'doudian.aftersale'
+  form.platform = 'doudian'
+  form.platformShopId = ''
+  form.platformShopName = ''
+  form.orderNo = ''
+  form.browserChannel = ''
   dialog.value = true
 }
 
+function onShopPick(id: string) {
+  form.platformShopId = id
+  const shop = shops.value.find((s) => s.platformShopId === id && s.platform === form.platform)
+  if (shop) {
+    form.platformShopName = shop.platformShopName
+    form.browserChannel = shop.browserChannel || ''
+  }
+}
+
+watch(
+  () => form.jobType,
+  (v) => {
+    const skill = skills.value.find((s) => s.id === v)
+    if (skill?.platform) form.platform = skill.platform
+  },
+)
+
 async function submit() {
-  try {
-    JSON.parse(form.paramsJson || '{}')
-  } catch {
-    ElMessage.error('paramsJson 不是合法 JSON')
+  if (!form.platformShopId) {
+    ElMessage.error('请选择店铺')
     return
   }
+  let paramsJson = '{}'
+  if (form.jobType === 'doudian.order.decrypt-phone') {
+    if (!form.orderNo.trim()) {
+      ElMessage.error('请填写订单号')
+      return
+    }
+    paramsJson = JSON.stringify({
+      orderNo: form.orderNo.trim(),
+      browserChannel: form.browserChannel || selectedShop.value?.browserChannel || 'msedge',
+    })
+  } else if (form.jobType === 'doudian.aftersale') {
+    paramsJson = JSON.stringify({
+      browserChannel: form.browserChannel || selectedShop.value?.browserChannel || '',
+    })
+  } else if (needsParamsJson.value) {
+    paramsJson = JSON.stringify({
+      browserChannel: form.browserChannel || selectedShop.value?.browserChannel || '',
+    })
+  }
+
   try {
-    await createJob({ ...form })
+    await createJob({
+      jobType: form.jobType,
+      platform: form.platform,
+      platformShopId: form.platformShopId,
+      platformShopName: form.platformShopName,
+      paramsJson,
+      source: form.source,
+      priority: form.priority,
+    })
     ElMessage.success('已创建任务')
     dialog.value = false
     await load()
@@ -121,19 +189,35 @@ onMounted(load)
         <el-form-item label="平台">
           <el-select v-model="form.platform" style="width: 100%">
             <el-option label="抖店" value="doudian" />
-            <el-option label="淘宝" value="taobao" />
-            <el-option label="拼多多" value="pdd" />
           </el-select>
         </el-form-item>
-        <el-form-item label="店铺 ID">
-          <el-input v-model="form.platformShopId" placeholder="平台侧店铺 ID" />
+        <el-form-item label="店铺">
+          <el-select
+            :model-value="form.platformShopId"
+            filterable
+            placeholder="选择 Agent 已上报店铺"
+            style="width: 100%"
+            @change="onShopPick"
+          >
+            <el-option
+              v-for="s in shops.filter((x) => x.platform === form.platform)"
+              :key="`${s.agentId}-${s.platformShopId}`"
+              :label="`${s.platformShopName || s.platformShopId} (${s.platformShopId})${s.agentOnline ? '' : ' · 离线'}`"
+              :value="s.platformShopId"
+            />
+          </el-select>
         </el-form-item>
-        <el-form-item label="店铺名称">
-          <el-input v-model="form.platformShopName" />
+        <el-form-item v-if="needsOrderNo" label="订单号">
+          <el-input v-model="form.orderNo" placeholder="抖店订单号" />
         </el-form-item>
-        <el-form-item label="参数 JSON">
-          <el-input v-model="form.paramsJson" type="textarea" :rows="6" />
-        </el-form-item>
+        <el-alert
+          v-if="form.jobType === 'doudian.aftersale'"
+          type="info"
+          :closable="false"
+          show-icon
+          title="售后抓取凭证由售后中心自动注入，无需填写。请确保售后店铺已启用 Agent 采集且店铺 ID 一致。"
+          style="margin-bottom: 12px"
+        />
       </el-form>
       <template #footer>
         <el-button @click="dialog = false">取消</el-button>

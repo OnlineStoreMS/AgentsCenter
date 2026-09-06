@@ -43,8 +43,8 @@ onMounted(load)
       <el-table-column prop="platform" label="平台" width="90" />
       <el-table-column prop="platformShopName" label="店铺名称" min-width="160" />
       <el-table-column prop="platformShopId" label="店铺 ID" min-width="140" show-overflow-tooltip />
-      <el-table-column prop="agentName" label="所在 Agent" width="140" />
-      <el-table-column label="Agent" width="90">
+      <el-table-column prop="agentName" label="所在节点" width="140" />
+      <el-table-column label="节点状态" width="90">
         <template #default="{ row }">
           <el-tag :type="row.agentOnline ? 'success' : 'info'" size="small">{{ row.agentOnline ? '在线' : '离线' }}</el-tag>
         </template>

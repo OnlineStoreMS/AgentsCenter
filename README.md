@@ -14,6 +14,8 @@ WindowsAgent             <--claim 任务 / report----  AgentsCenter
 
 售后抓取的**业务落库**仍在 AfterSalesCore（`/plugin/sync`）；AgentsCenter 只负责任务编排。
 
+创建 `doudian.aftersale` 任务时，中心会向售后内部接口拉取采集凭证并写入 `paramsJson`；售后「请求同步」/定时间隔也会经 `POST /api/v1/internal/jobs` 下发任务。
+
 ## 端口
 
 | Web | API | 公网 |

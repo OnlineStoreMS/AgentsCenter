@@ -19,11 +19,12 @@ import (
 const onlineWithin = 90 * time.Second
 
 type AgentService struct {
-	repos *repo.Repository
+	repos      *repo.Repository
+	aftersales *AfterSalesClient
 }
 
-func NewAgentService(repos *repo.Repository) *AgentService {
-	return &AgentService{repos: repos}
+func NewAgentService(repos *repo.Repository, aftersales *AfterSalesClient) *AgentService {
+	return &AgentService{repos: repos, aftersales: aftersales}
 }
 
 func (s *AgentService) Register(tenantID uint64, in *dto.AgentRegisterInput) (*dto.AgentRegisterResult, error) {
@@ -339,13 +340,43 @@ func (s *AgentService) CreateJob(tenantID, userID uint64, in *dto.CreateJobInput
 	if priority <= 0 {
 		priority = 100
 	}
+
+	paramsJSON := strings.TrimSpace(in.ParamsJSON)
+	shopName := strings.TrimSpace(in.PlatformShopName)
+	if jobType == model.JobTypeDoudianAftersale {
+		existing, err := s.findOpenJob(tenantID, jobType, platform, shopID)
+		if err != nil {
+			return nil, err
+		}
+		if existing != nil {
+			return existing, nil
+		}
+		if !paramsHavePluginCreds(paramsJSON) {
+			cred, err := s.aftersales.FetchCredential(tenantID, platform, shopID)
+			if err != nil {
+				return nil, fmt.Errorf("%w: 拉取售后采集凭证失败: %v", ErrBadRequest, err)
+			}
+			if shopName == "" {
+				shopName = cred.PlatformShopName
+				if shopName == "" {
+					shopName = cred.ShopName
+				}
+			}
+			merged, err := mergeAftersaleParams(paramsJSON, cred)
+			if err != nil {
+				return nil, err
+			}
+			paramsJSON = merged
+		}
+	}
+
 	job := model.AgentJob{
 		TenantID:         tenantID,
 		JobType:          jobType,
 		Platform:         platform,
 		PlatformShopID:   shopID,
-		PlatformShopName: strings.TrimSpace(in.PlatformShopName),
-		ParamsJSON:       in.ParamsJSON,
+		PlatformShopName: shopName,
+		ParamsJSON:       paramsJSON,
 		Source:           source,
 		Priority:         priority,
 		Status:           model.JobStatusPending,
@@ -355,6 +386,57 @@ func (s *AgentService) CreateJob(tenantID, userID uint64, in *dto.CreateJobInput
 		return nil, err
 	}
 	return &job, nil
+}
+
+func (s *AgentService) findOpenJob(tenantID uint64, jobType, platform, shopID string) (*model.AgentJob, error) {
+	var job model.AgentJob
+	err := s.repos.DB.Where(
+		"tenant_id = ? AND job_type = ? AND platform = ? AND platform_shop_id = ? AND status IN ?",
+		tenantID, jobType, platform, shopID,
+		[]string{model.JobStatusPending, model.JobStatusClaimed, model.JobStatusRunning},
+	).Order("id desc").First(&job).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &job, nil
+}
+
+func mergeAftersaleParams(existing string, cred *AfterSalesCredential) (string, error) {
+	m := map[string]any{}
+	if strings.TrimSpace(existing) != "" {
+		if err := json.Unmarshal([]byte(existing), &m); err != nil {
+			return "", fmt.Errorf("%w: paramsJson 非法", ErrBadRequest)
+		}
+	}
+	m["apiBase"] = cred.APIBase
+	m["shopId"] = cred.ShopID
+	m["shopName"] = cred.ShopName
+	m["platform"] = cred.Platform
+	m["pluginKey"] = cred.PluginKey
+	m["pluginSecret"] = cred.PluginSecret
+	m["platformShopId"] = cred.PlatformShopID
+	m["platformShopName"] = cred.PlatformShopName
+	b, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func paramsHavePluginCreds(paramsJSON string) bool {
+	if strings.TrimSpace(paramsJSON) == "" {
+		return false
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(paramsJSON), &m); err != nil {
+		return false
+	}
+	key, _ := m["pluginKey"].(string)
+	secret, _ := m["pluginSecret"].(string)
+	return strings.TrimSpace(key) != "" && strings.TrimSpace(secret) != ""
 }
 
 func (s *AgentService) ListAgents(tenantID uint64, page, pageSize int) ([]dto.AgentListItem, int64, error) {
@@ -376,8 +458,19 @@ func (s *AgentService) ListAgents(tenantID uint64, page, pageSize int) ([]dto.Ag
 	}
 	out := make([]dto.AgentListItem, 0, len(rows))
 	for _, a := range rows {
-		var shopCount int64
-		_ = s.repos.DB.Model(&model.AgentShop{}).Where("agent_id = ? AND status = ?", a.ID, model.ShopStatusActive).Count(&shopCount).Error
+		var shops []model.AgentShop
+		_ = s.repos.DB.Where("agent_id = ? AND status = ?", a.ID, model.ShopStatusActive).
+			Order("id asc").Find(&shops).Error
+		briefs := make([]dto.AgentShopBrief, 0, len(shops))
+		for _, sh := range shops {
+			briefs = append(briefs, dto.AgentShopBrief{
+				Platform:         sh.Platform,
+				PlatformShopID:   sh.PlatformShopID,
+				PlatformShopName: sh.PlatformShopName,
+				BrowserChannel:   sh.BrowserChannel,
+				Status:           sh.Status,
+			})
+		}
 		item := dto.AgentListItem{
 			ID:           a.ID,
 			MachineID:    a.MachineID,
@@ -387,7 +480,8 @@ func (s *AgentService) ListAgents(tenantID uint64, page, pageSize int) ([]dto.Ag
 			AgentVersion: a.AgentVersion,
 			Status:       a.Status,
 			SkillsJSON:   a.SkillsJSON,
-			ShopCount:    shopCount,
+			ShopCount:    int64(len(briefs)),
+			Shops:        briefs,
 			CreatedAt:    a.CreatedAt.Format(time.RFC3339),
 		}
 		if a.LastHeartbeat != nil {
@@ -399,7 +493,7 @@ func (s *AgentService) ListAgents(tenantID uint64, page, pageSize int) ([]dto.Ag
 	return out, total, nil
 }
 
-func (s *AgentService) ListShops(tenantID uint64, page, pageSize int, platform string) ([]dto.ShopListItem, int64, error) {
+func (s *AgentService) ListShops(tenantID uint64, page, pageSize int, platform string, onlineOnly bool) ([]dto.ShopListItem, int64, error) {
 	s.refreshOfflineAgents()
 	if page <= 0 {
 		page = 1
@@ -407,16 +501,20 @@ func (s *AgentService) ListShops(tenantID uint64, page, pageSize int, platform s
 	if pageSize <= 0 {
 		pageSize = 20
 	}
-	q := s.repos.DB.Model(&model.AgentShop{}).Where("tenant_id = ?", tenantID)
+	q := s.repos.DB.Model(&model.AgentShop{}).Where("agent_shops.tenant_id = ? AND agent_shops.status = ?", tenantID, model.ShopStatusActive)
 	if p := strings.TrimSpace(platform); p != "" {
-		q = q.Where("platform = ?", p)
+		q = q.Where("agent_shops.platform = ?", p)
+	}
+	if onlineOnly {
+		q = q.Joins("JOIN agents ON agents.id = agent_shops.agent_id").
+			Where("agents.status = ?", model.AgentStatusOnline)
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var rows []model.AgentShop
-	if err := q.Order("id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&rows).Error; err != nil {
+	if err := q.Order("agent_shops.id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&rows).Error; err != nil {
 		return nil, 0, err
 	}
 	out := make([]dto.ShopListItem, 0, len(rows))

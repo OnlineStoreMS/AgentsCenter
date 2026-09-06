@@ -45,7 +45,7 @@ func (h *Handlers) DashboardStats(c *gin.Context) {
 			online++
 		}
 	}
-	_, shopTotal, _ := h.svc.ListShops(tenantID, 1, 1, "")
+	_, shopTotal, _ := h.svc.ListShops(tenantID, 1, 1, "", false)
 	_, pendingTotal, _ := h.svc.ListJobs(tenantID, 1, 1, "pending", "")
 	_, runningTotal, _ := h.svc.ListJobs(tenantID, 1, 1, "running", "")
 	response.OK(c, gin.H{
@@ -73,7 +73,8 @@ func (h *Handlers) ListAgents(c *gin.Context) {
 
 func (h *Handlers) ListShops(c *gin.Context) {
 	page, pageSize := httputil.ParsePage(c)
-	list, total, err := h.svc.ListShops(authcontext.TenantID(c), page, pageSize, c.Query("platform"))
+	onlineOnly := c.Query("onlineOnly") == "1" || c.Query("onlineOnly") == "true"
+	list, total, err := h.svc.ListShops(authcontext.TenantID(c), page, pageSize, c.Query("platform"), onlineOnly)
 	if err != nil {
 		httputil.HandleServiceError(c, err)
 		return

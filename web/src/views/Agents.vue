@@ -22,6 +22,14 @@ async function load() {
   }
 }
 
+function shopsText(row: AgentItem) {
+  const shops = row.shops || []
+  if (!shops.length) return '—'
+  return shops
+    .map((s) => `${s.platformShopName || s.platformShopId}${s.browserChannel ? ` · ${s.browserChannel}` : ''}`)
+    .join('；')
+}
+
 onMounted(load)
 </script>
 
@@ -34,12 +42,14 @@ onMounted(load)
     <el-table :data="list" v-loading="loading" stripe>
       <el-table-column prop="id" label="ID" width="70" />
       <el-table-column prop="name" label="名称" min-width="120" />
-      <el-table-column prop="machineId" label="Machine ID" min-width="160" show-overflow-tooltip />
       <el-table-column prop="hostname" label="主机" width="120" />
       <el-table-column prop="status" label="状态" width="90">
         <template #default="{ row }">
           <el-tag :type="row.status === 'online' ? 'success' : 'info'" size="small">{{ row.status }}</el-tag>
         </template>
+      </el-table-column>
+      <el-table-column label="已登录店铺" min-width="280" show-overflow-tooltip>
+        <template #default="{ row }">{{ shopsText(row) }}</template>
       </el-table-column>
       <el-table-column prop="shopCount" label="店铺数" width="80" />
       <el-table-column prop="agentVersion" label="版本" width="90" />

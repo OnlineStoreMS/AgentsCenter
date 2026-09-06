@@ -10,6 +10,11 @@ database:
 auth:
   enabled: true
   jwt_secret: "change-me-in-production-use-long-random-string"
+  internal_token: "change-me-internal-token"
+
+aftersales:
+  base_url: "http://localhost:8093"
+  internal_token: "change-me-internal-token"
 
 cors:
   allow_origins:

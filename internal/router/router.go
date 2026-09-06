@@ -8,6 +8,7 @@ import (
 	jwtmgr "agentscenter/internal/pkg/jwt"
 	"agentscenter/internal/repo"
 	"agentscenter/internal/service"
+	"agentscenter/internalapi"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -22,9 +23,11 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	r.Use(gin.Logger(), gin.Recovery(), corsMiddleware(cfg))
 
 	repos := repo.New(db)
-	svc := service.NewAgentService(repos)
+	aftersales := service.NewAfterSalesClient(cfg.AfterSales.BaseURL, cfg.AfterSales.InternalToken)
+	svc := service.NewAgentService(repos, aftersales)
 	adminH := admin.NewHandlers(svc)
 	agentH := agentapi.NewHandler(svc)
+	internalH := internalapi.NewHandler(svc, cfg.Auth.InternalToken)
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok", "service": "agentscenter"})
@@ -49,6 +52,11 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	adminGroup.Use(adminmw.AdminAuth(&cfg.Auth, jwtMgr))
 	admin.RegisterRoutes(adminGroup, adminH)
 
+	internalGroup := v1.Group("/internal")
+	internalGroup.Use(internalH.AuthRequired())
+	internalGroup.POST("/jobs", internalH.CreateJob)
+	internalGroup.GET("/shops", internalH.ListShops)
+
 	return r
 }
 
@@ -67,7 +75,7 @@ func corsMiddleware(cfg *config.Config) gin.HandlerFunc {
 			c.Header("Access-Control-Allow-Origin", origin)
 		}
 		c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Agent-Key,X-Agent-Secret")
+        c.Header("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Agent-Key,X-Agent-Secret,X-Internal-Token")
 		c.Header("Access-Control-Allow-Credentials", "true")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
