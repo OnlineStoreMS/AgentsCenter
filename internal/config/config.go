@@ -41,6 +41,8 @@ type AfterSalesConfig struct {
 type JobsConfig struct {
 	// RetentionDays 执行记录保留天数；默认 3。进行中的 pending/claimed/running 不删。
 	RetentionDays int `mapstructure:"retention_days"`
+	// StaleMinutes claimed/running 超过该分钟数则标 failed，避免僵尸任务占坑。
+	StaleMinutes int `mapstructure:"stale_minutes"`
 }
 
 type CORSConfig struct {
@@ -85,6 +87,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Jobs.RetentionDays <= 0 {
 		cfg.Jobs.RetentionDays = 3
+	}
+	if cfg.Jobs.StaleMinutes <= 0 {
+		cfg.Jobs.StaleMinutes = 60
 	}
 	if len(cfg.CORS.AllowOrigins) == 0 {
 		cfg.CORS.AllowOrigins = []string{

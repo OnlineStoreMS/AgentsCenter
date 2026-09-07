@@ -31,6 +31,7 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	internalH := internalapi.NewHandler(svc, cfg.Auth.InternalToken)
 
 	scheduler.NewJobRetentionScheduler(svc, cfg.Jobs.RetentionDays).Start()
+	scheduler.NewStaleJobScheduler(svc, cfg.Jobs.StaleMinutes).Start()
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok", "service": "agentscenter"})

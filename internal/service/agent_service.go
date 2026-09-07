@@ -257,11 +257,12 @@ func (s *AgentService) ClaimJobs(agent *model.Agent, limit int) ([]dto.JobClaimR
 				break
 			}
 			var jobs []model.AgentJob
+			// 每店每轮最多认领 1 条：同店浏览器串行，多店可并行（由 Agent limit 控制）。
 			q := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 				Where("tenant_id = ? AND status = ? AND platform = ? AND platform_shop_id = ?",
 					shop.TenantID, model.JobStatusPending, shop.Platform, shop.PlatformShopID).
 				Order("priority ASC, id ASC").
-				Limit(limit - len(out))
+				Limit(1)
 			if err := q.Find(&jobs).Error; err != nil {
 				return err
 			}
@@ -1009,6 +1010,49 @@ func (s *AgentService) CleanupOldJobs(retentionDays int) (int64, error) {
 		[]string{model.JobStatusSucceeded, model.JobStatusFailed, model.JobStatusCancelled},
 	).Delete(&model.AgentJob{})
 	return res.RowsAffected, res.Error
+}
+
+// RecoverStaleInFlightJobs 将长时间卡在 claimed/running 的任务标为 failed。
+// claimed 以 claimed_at 为准；running 以 started_at（空则 claimed_at/updated_at）为准。
+func (s *AgentService) RecoverStaleInFlightJobs(staleMinutes int) (int64, error) {
+	if staleMinutes <= 0 {
+		staleMinutes = 60
+	}
+	cutoff := time.Now().Add(-time.Duration(staleMinutes) * time.Minute)
+	now := time.Now()
+	msg := fmt.Sprintf("超时未完成（>%d 分钟），中心自动回收", staleMinutes)
+
+	var total int64
+	resClaimed := s.repos.DB.Model(&model.AgentJob{}).
+		Where("status = ? AND claimed_at IS NOT NULL AND claimed_at < ?", model.JobStatusClaimed, cutoff).
+		Updates(map[string]interface{}{
+			"status":        model.JobStatusFailed,
+			"finished_at":   now,
+			"error_message": msg,
+			"updated_at":    now,
+		})
+	if resClaimed.Error != nil {
+		return total, resClaimed.Error
+	}
+	total += resClaimed.RowsAffected
+
+	// running：优先 started_at；若空则用 claimed_at / updated_at
+	resRunning := s.repos.DB.Model(&model.AgentJob{}).
+		Where(
+			"status = ? AND ((started_at IS NOT NULL AND started_at < ?) OR (started_at IS NULL AND claimed_at IS NOT NULL AND claimed_at < ?) OR (started_at IS NULL AND claimed_at IS NULL AND updated_at < ?))",
+			model.JobStatusRunning, cutoff, cutoff, cutoff,
+		).
+		Updates(map[string]interface{}{
+			"status":        model.JobStatusFailed,
+			"finished_at":   now,
+			"error_message": msg,
+			"updated_at":    now,
+		})
+	if resRunning.Error != nil {
+		return total, resRunning.Error
+	}
+	total += resRunning.RowsAffected
+	return total, nil
 }
 
 func (s *AgentService) refreshOfflineAgents() {

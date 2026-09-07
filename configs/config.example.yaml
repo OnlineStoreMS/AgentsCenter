@@ -18,6 +18,8 @@ aftersales:
 
 jobs:
   retention_days: 3
+  # claimed/running 超过该分钟未结束则自动标 failed（须大于 WA 整单超时，当前 WA≈45 分钟）
+  stale_minutes: 60
 
 cors:
   allow_origins:
