@@ -525,9 +525,10 @@ func (s *AgentService) ListAgents(tenantID uint64, page, pageSize int) ([]dto.Ag
 		pageSize = 20
 	}
 	var total int64
+	// 节点是否出现在某租户，只看该租户下是否有店铺（不看 agents.tenant_id）
 	q := s.repos.DB.Model(&model.Agent{}).Where(
-		"tenant_id = ? OR id IN (SELECT DISTINCT agent_id FROM agent_shops WHERE tenant_id = ?)",
-		tenantID, tenantID,
+		"id IN (SELECT DISTINCT agent_id FROM agent_shops WHERE tenant_id = ? AND status = ?)",
+		tenantID, model.ShopStatusActive,
 	)
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
