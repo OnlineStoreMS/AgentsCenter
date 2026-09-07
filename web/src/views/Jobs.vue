@@ -301,17 +301,24 @@ onMounted(load)
             <el-option label="running" value="running" />
             <el-option label="succeeded" value="succeeded" />
             <el-option label="failed" value="failed" />
+            <el-option label="cancelled" value="cancelled" />
           </el-select>
         </div>
         <el-table :data="list" v-loading="loading" stripe>
           <el-table-column prop="id" label="ID" width="70" />
-          <el-table-column prop="jobType" label="类型" min-width="180" show-overflow-tooltip />
-          <el-table-column prop="platformShopName" label="店铺" min-width="140" />
-          <el-table-column prop="platformShopId" label="店铺ID" min-width="120" show-overflow-tooltip />
+          <el-table-column prop="jobType" label="类型" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="platformShopName" label="店铺" min-width="130" />
+          <el-table-column prop="platformShopId" label="店铺ID" min-width="110" show-overflow-tooltip />
           <el-table-column prop="status" label="状态" width="100" />
           <el-table-column prop="agentName" label="执行节点" width="120" />
           <el-table-column prop="source" label="来源" width="100" />
           <el-table-column prop="createdAt" label="创建时间" min-width="170" />
+          <el-table-column prop="startedAt" label="开始时间" min-width="170">
+            <template #default="{ row }">{{ row.startedAt || '—' }}</template>
+          </el-table-column>
+          <el-table-column prop="finishedAt" label="结束时间" min-width="170">
+            <template #default="{ row }">{{ row.finishedAt || '—' }}</template>
+          </el-table-column>
           <el-table-column prop="errorMessage" label="错误" min-width="160" show-overflow-tooltip />
         </el-table>
         <div class="pager">

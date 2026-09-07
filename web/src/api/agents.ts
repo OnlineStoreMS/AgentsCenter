@@ -57,6 +57,7 @@ export interface JobItem {
   agentName: string
   errorMessage: string
   createdAt: string
+  startedAt?: string
   finishedAt?: string
 }
 

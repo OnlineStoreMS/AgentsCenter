@@ -369,16 +369,6 @@ func (s *AgentService) CreateJob(tenantID, userID uint64, in *dto.CreateJobInput
 	paramsJSON := strings.TrimSpace(in.ParamsJSON)
 	shopName := strings.TrimSpace(in.PlatformShopName)
 	if jobType == model.JobTypeDoudianAftersale {
-		existing, err := s.findPendingJob(tenantID, jobType, platform, shopID)
-		if err != nil {
-			return nil, err
-		}
-		if existing != nil {
-			if err := s.refreshAftersaleJobParams(existing, tenantID, platform, shopID, &shopName, paramsJSON); err != nil {
-				return nil, err
-			}
-			return existing, nil
-		}
 		enriched, name, err := s.enrichAftersaleParams(tenantID, platform, shopID, shopName, paramsJSON)
 		if err != nil {
 			return nil, err
@@ -405,7 +395,7 @@ func (s *AgentService) CreateJob(tenantID, userID uint64, in *dto.CreateJobInput
 	return &job, nil
 }
 
-// findPendingJob 仅复用尚未被领取的执行单，便于参数更新后重新下发。
+// findPendingJob 查找尚未领取的执行单（用于参数同步等，不用于「立即执行」复用）。
 func (s *AgentService) findPendingJob(tenantID uint64, jobType, platform, shopID string) (*model.AgentJob, error) {
 	var job model.AgentJob
 	err := s.repos.DB.Where(
@@ -419,6 +409,22 @@ func (s *AgentService) findPendingJob(tenantID uint64, jobType, platform, shopID
 		return nil, err
 	}
 	return &job, nil
+}
+
+// cancelPendingJobs 取消同店同类型尚未领取的执行单，避免立即执行后仍先跑旧排队。
+func (s *AgentService) cancelPendingJobs(tenantID uint64, jobType, platform, shopID, reason string) error {
+	now := time.Now()
+	return s.repos.DB.Model(&model.AgentJob{}).
+		Where(
+			"tenant_id = ? AND job_type = ? AND platform = ? AND platform_shop_id = ? AND status = ?",
+			tenantID, jobType, platform, shopID, model.JobStatusPending,
+		).
+		Updates(map[string]any{
+			"status":        model.JobStatusCancelled,
+			"error_message": reason,
+			"finished_at":   now,
+			"updated_at":    now,
+		}).Error
 }
 
 func (s *AgentService) enrichAftersaleParams(tenantID uint64, platform, shopID, shopName, paramsJSON string) (string, string, error) {
@@ -666,6 +672,10 @@ func (s *AgentService) ListJobs(tenantID uint64, page, pageSize int, status, job
 			if s.repos.DB.Select("name").First(&agent, *j.AgentID).Error == nil {
 				item.AgentName = agent.Name
 			}
+		}
+		if j.StartedAt != nil {
+			t := j.StartedAt.Format(time.RFC3339)
+			item.StartedAt = &t
 		}
 		if j.FinishedAt != nil {
 			t := j.FinishedAt.Format(time.RFC3339)
@@ -954,6 +964,11 @@ func (s *AgentService) triggerAssignmentLocked(row *model.TaskAssignment, userID
 	if source == "" {
 		source = "manual"
 	}
+	// 立即/到点触发：取消旧 pending，再新建一条，创建时间即本次触发时间
+	_ = s.cancelPendingJobs(
+		row.TenantID, row.JobType, row.Platform, row.PlatformShopID,
+		"已被更新的执行请求取代",
+	)
 	job, err := s.CreateJob(row.TenantID, userID, &dto.CreateJobInput{
 		JobType:          row.JobType,
 		Platform:         row.Platform,

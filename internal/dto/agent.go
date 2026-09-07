@@ -130,6 +130,7 @@ type JobListItem struct {
 	AgentName        string  `json:"agentName"`
 	ErrorMessage     string  `json:"errorMessage"`
 	CreatedAt        string  `json:"createdAt"`
+	StartedAt        *string `json:"startedAt"`
 	FinishedAt       *string `json:"finishedAt"`
 }
 
