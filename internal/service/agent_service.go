@@ -149,7 +149,8 @@ func (s *AgentService) Heartbeat(agent *model.Agent, in *dto.AgentHeartbeatInput
 
 	var pending int64
 	_ = s.repos.DB.Model(&model.AgentJob{}).
-		Where("tenant_id = ? AND status = ?", agent.TenantID, model.JobStatusPending).
+		Where("status = ? AND (platform, platform_shop_id) IN (SELECT platform, platform_shop_id FROM agent_shops WHERE agent_id = ? AND status = ?)",
+			model.JobStatusPending, agent.ID, model.ShopStatusActive).
 		Count(&pending).Error
 
 	return &dto.AgentHeartbeatResult{
@@ -168,6 +169,9 @@ func (s *AgentService) upsertShops(agent *model.Agent, shops []dto.AgentShopRepo
 			if platform == "" || shopID == "" {
 				continue
 			}
+			if sh.TenantID == 0 {
+				return fmt.Errorf("%w: 店铺 %s/%s 缺少 tenantId", ErrBadRequest, platform, shopID)
+			}
 			key := platform + "|" + shopID
 			seen[key] = struct{}{}
 			caps, _ := json.Marshal(sh.Capabilities)
@@ -180,7 +184,7 @@ func (s *AgentService) upsertShops(agent *model.Agent, shops []dto.AgentShopRepo
 				First(&row).Error
 			if err == gorm.ErrRecordNotFound {
 				row = model.AgentShop{
-					TenantID:         agent.TenantID,
+					TenantID:         sh.TenantID,
 					AgentID:          agent.ID,
 					Platform:         platform,
 					PlatformShopID:   shopID,
@@ -198,6 +202,7 @@ func (s *AgentService) upsertShops(agent *model.Agent, shops []dto.AgentShopRepo
 			if err != nil {
 				return err
 			}
+			row.TenantID = sh.TenantID
 			row.PlatformShopName = strings.TrimSpace(sh.PlatformShopName)
 			row.BrowserChannel = strings.TrimSpace(sh.BrowserChannel)
 			row.CapabilitiesJSON = string(caps)
@@ -254,7 +259,7 @@ func (s *AgentService) ClaimJobs(agent *model.Agent, limit int) ([]dto.JobClaimR
 			var jobs []model.AgentJob
 			q := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 				Where("tenant_id = ? AND status = ? AND platform = ? AND platform_shop_id = ?",
-					agent.TenantID, model.JobStatusPending, shop.Platform, shop.PlatformShopID).
+					shop.TenantID, model.JobStatusPending, shop.Platform, shop.PlatformShopID).
 				Order("priority ASC, id ASC").
 				Limit(limit - len(out))
 			if err := q.Find(&jobs).Error; err != nil {
@@ -272,7 +277,7 @@ func (s *AgentService) ClaimJobs(agent *model.Agent, limit int) ([]dto.JobClaimR
 					if s.aftersales == nil {
 						continue
 					}
-					cred, ferr := s.aftersales.FetchCredential(agent.TenantID, job.Platform, job.PlatformShopID)
+					cred, ferr := s.aftersales.FetchCredential(shop.TenantID, job.Platform, job.PlatformShopID)
 					if ferr != nil {
 						continue
 					}
@@ -520,7 +525,10 @@ func (s *AgentService) ListAgents(tenantID uint64, page, pageSize int) ([]dto.Ag
 		pageSize = 20
 	}
 	var total int64
-	q := s.repos.DB.Model(&model.Agent{}).Where("tenant_id = ?", tenantID)
+	q := s.repos.DB.Model(&model.Agent{}).Where(
+		"tenant_id = ? OR id IN (SELECT DISTINCT agent_id FROM agent_shops WHERE tenant_id = ?)",
+		tenantID, tenantID,
+	)
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -531,7 +539,7 @@ func (s *AgentService) ListAgents(tenantID uint64, page, pageSize int) ([]dto.Ag
 	out := make([]dto.AgentListItem, 0, len(rows))
 	for _, a := range rows {
 		var shops []model.AgentShop
-		_ = s.repos.DB.Where("agent_id = ? AND status = ?", a.ID, model.ShopStatusActive).
+		_ = s.repos.DB.Where("agent_id = ? AND tenant_id = ? AND status = ?", a.ID, tenantID, model.ShopStatusActive).
 			Order("id asc").Find(&shops).Error
 		briefs := make([]dto.AgentShopBrief, 0, len(shops))
 		for _, sh := range shops {

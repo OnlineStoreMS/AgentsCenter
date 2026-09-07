@@ -18,6 +18,7 @@ type AgentRegisterResult struct {
 }
 
 type AgentShopReport struct {
+	TenantID         uint64   `json:"tenantId"` // 店铺所属租户；必填（>0）
 	Platform         string   `json:"platform" binding:"required"`
 	PlatformShopID   string   `json:"platformShopId" binding:"required"`
 	PlatformShopName string   `json:"platformShopName"`

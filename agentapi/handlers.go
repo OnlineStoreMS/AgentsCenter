@@ -30,7 +30,8 @@ func (h *Handler) Register(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	item, err := h.svc.Register(1, &in)
+	// Agent 节点本身不绑租户；租户挂在上报的店铺上。新建节点记 tenant_id=0。
+	item, err := h.svc.Register(0, &in)
 	if err != nil {
 		httputil.HandleServiceError(c, err)
 		return
