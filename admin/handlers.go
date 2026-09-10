@@ -68,7 +68,9 @@ func (h *Handlers) ListSkills(c *gin.Context) {
 
 func (h *Handlers) ListAgents(c *gin.Context) {
 	page, pageSize := httputil.ParsePage(c)
-	list, total, err := h.svc.ListAgents(authcontext.TenantID(c), page, pageSize)
+	onlineOnly := c.Query("onlineOnly") == "1" || c.Query("onlineOnly") == "true"
+	skill := c.Query("skill")
+	list, total, err := h.svc.ListAgentsFiltered(authcontext.TenantID(c), page, pageSize, onlineOnly, skill)
 	if err != nil {
 		httputil.HandleServiceError(c, err)
 		return

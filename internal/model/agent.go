@@ -52,6 +52,8 @@ type AgentJob struct {
 	Source           string     `gorm:"size:64" json:"source"` // aftersales/order/product/manual
 	Priority         int        `gorm:"not null;default:100" json:"priority"`
 	Status           string     `gorm:"size:16;index;not null;default:pending" json:"status"`
+	// TargetAgentID 指定执行机（如快递助手远程打单）；非空时仅该 Agent 可领取，不按店铺匹配。
+	TargetAgentID    *uint64    `gorm:"index" json:"targetAgentId,omitempty"`
 	AgentID          *uint64    `gorm:"index" json:"agentId"`
 	ClaimedAt        *time.Time `json:"claimedAt"`
 	StartedAt        *time.Time `json:"startedAt"`

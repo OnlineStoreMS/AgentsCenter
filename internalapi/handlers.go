@@ -48,12 +48,27 @@ func (h *Handler) CreateJob(c *gin.Context) {
 		ParamsJSON:       in.ParamsJSON,
 		Source:           in.Source,
 		Priority:         in.Priority,
+		TargetAgentID:    in.TargetAgentID,
 	})
 	if err != nil {
 		httputil.HandleServiceError(c, err)
 		return
 	}
 	response.Created(c, job)
+}
+
+func (h *Handler) ListAgents(c *gin.Context) {
+	tenantID, _ := strconv.ParseUint(c.Query("tenantId"), 10, 64)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "100"))
+	onlineOnly := c.Query("onlineOnly") == "1" || c.Query("onlineOnly") == "true"
+	skill := strings.TrimSpace(c.Query("skill"))
+	list, total, err := h.svc.ListAgentsFiltered(tenantID, page, pageSize, onlineOnly, skill)
+	if err != nil {
+		httputil.HandleServiceError(c, err)
+		return
+	}
+	response.OK(c, response.PageResult(list, total, page, pageSize))
 }
 
 func (h *Handler) ListShops(c *gin.Context) {

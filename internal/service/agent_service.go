@@ -236,22 +236,59 @@ func (s *AgentService) ClaimJobs(agent *model.Agent, limit int) ([]dto.JobClaimR
 	}
 	s.refreshOfflineAgents()
 
-	var shops []model.AgentShop
-	if err := s.repos.DB.Where("agent_id = ? AND status = ?", agent.ID, model.ShopStatusActive).Find(&shops).Error; err != nil {
-		return nil, err
-	}
-	if len(shops) == 0 {
-		return []dto.JobClaimResult{}, nil
-	}
-
 	skills := parseSkills(agent.SkillsJSON)
 	skillSet := map[string]struct{}{}
 	for _, sk := range skills {
 		skillSet[sk] = struct{}{}
 	}
 
+	var shops []model.AgentShop
+	if err := s.repos.DB.Where("agent_id = ? AND status = ?", agent.ID, model.ShopStatusActive).Find(&shops).Error; err != nil {
+		return nil, err
+	}
+
 	var out []dto.JobClaimResult
 	err := s.repos.DB.Transaction(func(tx *gorm.DB) error {
+		now := time.Now()
+		// 1) 指定本机的任务（远程打单等）：不依赖店铺列表。
+		if len(out) < limit {
+			remain := limit - len(out)
+			var targeted []model.AgentJob
+			tq := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("status = ? AND target_agent_id = ?", model.JobStatusPending, agent.ID).
+				Order("priority ASC, id ASC").
+				Limit(remain)
+			if err := tq.Find(&targeted).Error; err != nil {
+				return err
+			}
+			for i := range targeted {
+				job := &targeted[i]
+				if len(skillSet) > 0 {
+					if _, ok := skillSet[job.JobType]; !ok {
+						continue
+					}
+				}
+				aid := agent.ID
+				job.Status = model.JobStatusClaimed
+				job.AgentID = &aid
+				job.ClaimedAt = &now
+				if err := tx.Save(job).Error; err != nil {
+					return err
+				}
+				out = append(out, dto.JobClaimResult{
+					ID:               job.ID,
+					JobType:          job.JobType,
+					Platform:         job.Platform,
+					PlatformShopID:   job.PlatformShopID,
+					PlatformShopName: job.PlatformShopName,
+					ParamsJSON:       job.ParamsJSON,
+					Source:           job.Source,
+					Priority:         job.Priority,
+				})
+			}
+		}
+
+		// 2) 按店铺匹配的任务（售后采集等）。
 		for _, shop := range shops {
 			if len(out) >= limit {
 				break
@@ -259,14 +296,13 @@ func (s *AgentService) ClaimJobs(agent *model.Agent, limit int) ([]dto.JobClaimR
 			var jobs []model.AgentJob
 			// 每店每轮最多认领 1 条：同店浏览器串行，多店可并行（由 Agent limit 控制）。
 			q := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-				Where("tenant_id = ? AND status = ? AND platform = ? AND platform_shop_id = ?",
+				Where("tenant_id = ? AND status = ? AND platform = ? AND platform_shop_id = ? AND (target_agent_id IS NULL OR target_agent_id = 0)",
 					shop.TenantID, model.JobStatusPending, shop.Platform, shop.PlatformShopID).
 				Order("priority ASC, id ASC").
 				Limit(1)
 			if err := q.Find(&jobs).Error; err != nil {
 				return err
 			}
-			now := time.Now()
 			for i := range jobs {
 				job := &jobs[i]
 				if len(skillSet) > 0 {
@@ -355,7 +391,40 @@ func (s *AgentService) CreateJob(tenantID, userID uint64, in *dto.CreateJobInput
 	jobType := strings.TrimSpace(in.JobType)
 	platform := strings.TrimSpace(in.Platform)
 	shopID := strings.TrimSpace(in.PlatformShopID)
-	if jobType == "" || platform == "" || shopID == "" {
+	if jobType == "" {
+		return nil, fmt.Errorf("%w: jobType 必填", ErrBadRequest)
+	}
+	if in.TargetAgentID != nil && *in.TargetAgentID > 0 {
+		if platform == "" {
+			platform = "shipping"
+		}
+		if shopID == "" {
+			shopID = "kdzs-print"
+		}
+		var agent model.Agent
+		if err := s.repos.DB.First(&agent, *in.TargetAgentID).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return nil, fmt.Errorf("%w: 指定 Agent 不存在", ErrNotFound)
+			}
+			return nil, err
+		}
+		s.refreshOfflineAgents()
+		_ = s.repos.DB.First(&agent, agent.ID).Error
+		if agent.Status != model.AgentStatusOnline {
+			return nil, fmt.Errorf("%w: 指定 Agent 离线", ErrBadRequest)
+		}
+		skills := parseSkills(agent.SkillsJSON)
+		okSkill := false
+		for _, sk := range skills {
+			if sk == jobType {
+				okSkill = true
+				break
+			}
+		}
+		if !okSkill && len(skills) > 0 {
+			return nil, fmt.Errorf("%w: 指定 Agent 不支持技能 %s", ErrBadRequest, jobType)
+		}
+	} else if platform == "" || shopID == "" {
 		return nil, fmt.Errorf("%w: jobType/platform/platformShopId 必填", ErrBadRequest)
 	}
 	source := strings.TrimSpace(in.Source)
@@ -377,6 +446,9 @@ func (s *AgentService) CreateJob(tenantID, userID uint64, in *dto.CreateJobInput
 		paramsJSON = enriched
 		shopName = name
 	}
+	if shopName == "" && in.TargetAgentID != nil {
+		shopName = "远程打单"
+	}
 
 	job := model.AgentJob{
 		TenantID:         tenantID,
@@ -389,6 +461,7 @@ func (s *AgentService) CreateJob(tenantID, userID uint64, in *dto.CreateJobInput
 		Priority:         priority,
 		Status:           model.JobStatusPending,
 		CreatedBy:        userID,
+		TargetAgentID:    in.TargetAgentID,
 	}
 	if err := s.repos.DB.Create(&job).Error; err != nil {
 		return nil, err
@@ -524,6 +597,11 @@ func paramsHavePluginCreds(paramsJSON string) bool {
 }
 
 func (s *AgentService) ListAgents(tenantID uint64, page, pageSize int) ([]dto.AgentListItem, int64, error) {
+	return s.ListAgentsFiltered(tenantID, page, pageSize, false, "")
+}
+
+// ListAgentsFiltered 列出租户可见 Agent；onlineOnly / skill 可选过滤（skill 如 kdzs.remote.print）。
+func (s *AgentService) ListAgentsFiltered(tenantID uint64, page, pageSize int, onlineOnly bool, skill string) ([]dto.AgentListItem, int64, error) {
 	s.refreshOfflineAgents()
 	if page <= 0 {
 		page = 1
@@ -531,21 +609,49 @@ func (s *AgentService) ListAgents(tenantID uint64, page, pageSize int) ([]dto.Ag
 	if pageSize <= 0 {
 		pageSize = 20
 	}
-	var total int64
-	// 节点是否出现在某租户，只看该租户下是否有店铺（不看 agents.tenant_id）
+	skill = strings.TrimSpace(skill)
+
+	var rows []model.Agent
 	q := s.repos.DB.Model(&model.Agent{}).Where(
 		"id IN (SELECT DISTINCT agent_id FROM agent_shops WHERE tenant_id = ? AND status = ?)",
 		tenantID, model.ShopStatusActive,
 	)
-	if err := q.Count(&total).Error; err != nil {
+	if onlineOnly {
+		q = q.Where("status = ?", model.AgentStatusOnline)
+	}
+	if err := q.Order("id DESC").Find(&rows).Error; err != nil {
 		return nil, 0, err
 	}
-	var rows []model.Agent
-	if err := q.Order("id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&rows).Error; err != nil {
-		return nil, 0, err
-	}
-	out := make([]dto.AgentListItem, 0, len(rows))
+
+	filtered := make([]model.Agent, 0, len(rows))
 	for _, a := range rows {
+		if skill != "" {
+			ok := false
+			for _, sk := range parseSkills(a.SkillsJSON) {
+				if sk == skill {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				continue
+			}
+		}
+		filtered = append(filtered, a)
+	}
+	total := int64(len(filtered))
+	start := (page - 1) * pageSize
+	if start > len(filtered) {
+		start = len(filtered)
+	}
+	end := start + pageSize
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	pageRows := filtered[start:end]
+
+	out := make([]dto.AgentListItem, 0, len(pageRows))
+	for _, a := range pageRows {
 		var shops []model.AgentShop
 		_ = s.repos.DB.Where("agent_id = ? AND tenant_id = ? AND status = ?", a.ID, tenantID, model.ShopStatusActive).
 			Order("id asc").Find(&shops).Error

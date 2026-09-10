@@ -59,24 +59,26 @@ type JobReportInput struct {
 }
 
 type CreateJobInput struct {
-	JobType          string `json:"jobType" binding:"required"`
-	Platform         string `json:"platform" binding:"required"`
-	PlatformShopID   string `json:"platformShopId" binding:"required"`
-	PlatformShopName string `json:"platformShopName"`
-	ParamsJSON       string `json:"paramsJson"`
-	Source           string `json:"source"`
-	Priority         int    `json:"priority"`
+	JobType          string  `json:"jobType" binding:"required"`
+	Platform         string  `json:"platform"`
+	PlatformShopID   string  `json:"platformShopId"`
+	PlatformShopName string  `json:"platformShopName"`
+	ParamsJSON       string  `json:"paramsJson"`
+	Source           string  `json:"source"`
+	Priority         int     `json:"priority"`
+	TargetAgentID    *uint64 `json:"targetAgentId"`
 }
 
 type InternalCreateJobInput struct {
-	TenantID         uint64 `json:"tenantId" binding:"required"`
-	JobType          string `json:"jobType" binding:"required"`
-	Platform         string `json:"platform" binding:"required"`
-	PlatformShopID   string `json:"platformShopId" binding:"required"`
-	PlatformShopName string `json:"platformShopName"`
-	ParamsJSON       string `json:"paramsJson"`
-	Source           string `json:"source"`
-	Priority         int    `json:"priority"`
+	TenantID         uint64  `json:"tenantId" binding:"required"`
+	JobType          string  `json:"jobType" binding:"required"`
+	Platform         string  `json:"platform"`
+	PlatformShopID   string  `json:"platformShopId"`
+	PlatformShopName string  `json:"platformShopName"`
+	ParamsJSON       string  `json:"paramsJson"`
+	Source           string  `json:"source"`
+	Priority         int     `json:"priority"`
+	TargetAgentID    *uint64 `json:"targetAgentId"`
 }
 
 type AgentListItem struct {
