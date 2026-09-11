@@ -147,15 +147,20 @@ func (s *AgentService) Heartbeat(agent *model.Agent, in *dto.AgentHeartbeatInput
 		}
 	}
 
-	var pending int64
+	var pendingShop int64
 	_ = s.repos.DB.Model(&model.AgentJob{}).
-		Where("status = ? AND (platform, platform_shop_id) IN (SELECT platform, platform_shop_id FROM agent_shops WHERE agent_id = ? AND status = ?)",
+		Where("status = ? AND (target_agent_id IS NULL OR target_agent_id = 0) AND (platform, platform_shop_id) IN (SELECT platform, platform_shop_id FROM agent_shops WHERE agent_id = ? AND status = ?)",
 			model.JobStatusPending, agent.ID, model.ShopStatusActive).
-		Count(&pending).Error
+		Count(&pendingShop).Error
+
+	var pendingTarget int64
+	_ = s.repos.DB.Model(&model.AgentJob{}).
+		Where("status = ? AND target_agent_id = ?", model.JobStatusPending, agent.ID).
+		Count(&pendingTarget).Error
 
 	return &dto.AgentHeartbeatResult{
 		ServerTime:        now.Format(time.RFC3339),
-		PendingJobs:       pending,
+		PendingJobs:       pendingShop + pendingTarget,
 		HeartbeatInterval: 20,
 	}, nil
 }
