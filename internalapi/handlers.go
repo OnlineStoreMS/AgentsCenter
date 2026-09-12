@@ -57,6 +57,30 @@ func (h *Handler) CreateJob(c *gin.Context) {
 	response.Created(c, job)
 }
 
+func (h *Handler) GetJobs(c *gin.Context) {
+	tenantID, _ := strconv.ParseUint(c.Query("tenantId"), 10, 64)
+	raw := strings.TrimSpace(c.Query("ids"))
+	if raw == "" {
+		response.OK(c, gin.H{"list": []any{}})
+		return
+	}
+	parts := strings.Split(raw, ",")
+	ids := make([]uint64, 0, len(parts))
+	for _, p := range parts {
+		id, err := strconv.ParseUint(strings.TrimSpace(p), 10, 64)
+		if err != nil || id == 0 {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	list, err := h.svc.GetJobsByIDs(tenantID, ids)
+	if err != nil {
+		httputil.HandleServiceError(c, err)
+		return
+	}
+	response.OK(c, gin.H{"list": list})
+}
+
 func (h *Handler) ListAgents(c *gin.Context) {
 	tenantID, _ := strconv.ParseUint(c.Query("tenantId"), 10, 64)
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))

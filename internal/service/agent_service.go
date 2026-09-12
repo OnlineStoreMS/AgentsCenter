@@ -741,6 +741,66 @@ func (s *AgentService) ListShops(tenantID uint64, page, pageSize int, platform s
 	return out, total, nil
 }
 
+func (s *AgentService) GetJobsByIDs(tenantID uint64, ids []uint64) ([]dto.JobListItem, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	uniq := make([]uint64, 0, len(ids))
+	seen := map[uint64]struct{}{}
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniq = append(uniq, id)
+	}
+	if len(uniq) == 0 {
+		return nil, nil
+	}
+	q := s.repos.DB.Model(&model.AgentJob{}).Where("id IN ?", uniq)
+	if tenantID > 0 {
+		q = q.Where("tenant_id = ?", tenantID)
+	}
+	var rows []model.AgentJob
+	if err := q.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]dto.JobListItem, 0, len(rows))
+	for _, j := range rows {
+		item := dto.JobListItem{
+			ID:               j.ID,
+			JobType:          j.JobType,
+			Platform:         j.Platform,
+			PlatformShopID:   j.PlatformShopID,
+			PlatformShopName: j.PlatformShopName,
+			ParamsJSON:       j.ParamsJSON,
+			Source:           j.Source,
+			Priority:         j.Priority,
+			Status:           j.Status,
+			AgentID:          j.AgentID,
+			ErrorMessage:     j.ErrorMessage,
+			CreatedAt:        j.CreatedAt.Format(time.RFC3339),
+		}
+		if j.ClaimedAt != nil {
+			t := j.ClaimedAt.Format(time.RFC3339)
+			item.StartedAt = &t
+		}
+		if j.StartedAt != nil {
+			t := j.StartedAt.Format(time.RFC3339)
+			item.StartedAt = &t
+		}
+		if j.FinishedAt != nil {
+			t := j.FinishedAt.Format(time.RFC3339)
+			item.FinishedAt = &t
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
 func (s *AgentService) ListJobs(tenantID uint64, page, pageSize int, status, jobType string) ([]dto.JobListItem, int64, error) {
 	if page <= 0 {
 		page = 1
