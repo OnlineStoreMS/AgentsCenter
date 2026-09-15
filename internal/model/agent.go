@@ -55,6 +55,10 @@ type AgentJob struct {
 	// TargetAgentID 指定执行机（如快递助手远程打单）；非空时仅该 Agent 可领取，不按店铺匹配。
 	TargetAgentID    *uint64    `gorm:"index" json:"targetAgentId,omitempty"`
 	AgentID          *uint64    `gorm:"index" json:"agentId"`
+	// LastAgentID 上次领取失败/超时的机器；有其他在线同店同能力机器时优先换机。
+	LastAgentID      *uint64    `gorm:"index" json:"lastAgentId,omitempty"`
+	// AttemptCount 被机器领取的次数；超时回收或可重试失败后回到 pending，超过上限则失败。
+	AttemptCount     int        `gorm:"not null;default:0" json:"attemptCount"`
 	ClaimedAt        *time.Time `json:"claimedAt"`
 	StartedAt        *time.Time `json:"startedAt"`
 	FinishedAt       *time.Time `json:"finishedAt"`

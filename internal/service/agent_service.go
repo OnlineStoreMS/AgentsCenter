@@ -18,6 +18,9 @@ import (
 
 const onlineWithin = 90 * time.Second
 
+// maxJobAttempts 同一执行单最多被领取次数（含超时回收后再领）。
+const maxJobAttempts = 3
+
 type AgentService struct {
 	repos      *repo.Repository
 	aftersales *AfterSalesClient
@@ -147,11 +150,21 @@ func (s *AgentService) Heartbeat(agent *model.Agent, in *dto.AgentHeartbeatInput
 		}
 	}
 
+	var shops []model.AgentShop
+	_ = s.repos.DB.Where("agent_id = ? AND status = ?", agent.ID, model.ShopStatusActive).Find(&shops).Error
 	var pendingShop int64
-	_ = s.repos.DB.Model(&model.AgentJob{}).
-		Where("status = ? AND (target_agent_id IS NULL OR target_agent_id = 0) AND (platform, platform_shop_id) IN (SELECT platform, platform_shop_id FROM agent_shops WHERE agent_id = ? AND status = ?)",
-			model.JobStatusPending, agent.ID, model.ShopStatusActive).
-		Count(&pendingShop).Error
+	for _, shop := range shops {
+		caps := parseSkills(shop.CapabilitiesJSON)
+		if len(caps) == 0 {
+			continue
+		}
+		var n int64
+		_ = s.repos.DB.Model(&model.AgentJob{}).
+			Where("status = ? AND tenant_id = ? AND platform = ? AND platform_shop_id = ? AND job_type IN ? AND (target_agent_id IS NULL OR target_agent_id = 0)",
+				model.JobStatusPending, shop.TenantID, shop.Platform, shop.PlatformShopID, caps).
+			Count(&n).Error
+		pendingShop += n
+	}
 
 	var pendingTarget int64
 	_ = s.repos.DB.Model(&model.AgentJob{}).
@@ -273,38 +286,30 @@ func (s *AgentService) ClaimJobs(agent *model.Agent, limit int) ([]dto.JobClaimR
 						continue
 					}
 				}
-				aid := agent.ID
-				job.Status = model.JobStatusClaimed
-				job.AgentID = &aid
-				job.ClaimedAt = &now
-				if err := tx.Save(job).Error; err != nil {
-					return err
+				claimed, ok := takePendingJob(tx, job, agent.ID, now)
+				if !ok {
+					continue
 				}
-				out = append(out, dto.JobClaimResult{
-					ID:               job.ID,
-					JobType:          job.JobType,
-					Platform:         job.Platform,
-					PlatformShopID:   job.PlatformShopID,
-					PlatformShopName: job.PlatformShopName,
-					ParamsJSON:       job.ParamsJSON,
-					Source:           job.Source,
-					Priority:         job.Priority,
-				})
+				out = append(out, claimed)
 			}
 		}
 
-		// 2) 按店铺匹配的任务（售后采集等）。
+		// 2) 按店铺匹配的任务（售后采集等）。多机同店：谁先 claim 谁领，不哈希、不均分。
 		for _, shop := range shops {
 			if len(out) >= limit {
 				break
 			}
+			shopCaps := parseSkills(shop.CapabilitiesJSON)
+			if len(shopCaps) == 0 {
+				continue
+			}
 			var jobs []model.AgentJob
 			// 每店每轮最多认领 1 条：同店浏览器串行，多店可并行（由 Agent limit 控制）。
 			q := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-				Where("tenant_id = ? AND status = ? AND platform = ? AND platform_shop_id = ? AND (target_agent_id IS NULL OR target_agent_id = 0)",
-					shop.TenantID, model.JobStatusPending, shop.Platform, shop.PlatformShopID).
+				Where("tenant_id = ? AND status = ? AND platform = ? AND platform_shop_id = ? AND job_type IN ? AND (target_agent_id IS NULL OR target_agent_id = 0)",
+					shop.TenantID, model.JobStatusPending, shop.Platform, shop.PlatformShopID, shopCaps).
 				Order("priority ASC, id ASC").
-				Limit(1)
+				Limit(5)
 			if err := q.Find(&jobs).Error; err != nil {
 				return err
 			}
@@ -314,6 +319,10 @@ func (s *AgentService) ClaimJobs(agent *model.Agent, limit int) ([]dto.JobClaimR
 					if _, ok := skillSet[job.JobType]; !ok {
 						continue
 					}
+				}
+				if job.LastAgentID != nil && *job.LastAgentID == agent.ID &&
+					s.otherOnlineCapableAgent(tx, agent.ID, shop, job.JobType) {
+					continue
 				}
 				if job.JobType == model.JobTypeDoudianAftersale && !paramsHavePluginCreds(job.ParamsJSON) {
 					if s.aftersales == nil {
@@ -335,28 +344,43 @@ func (s *AgentService) ClaimJobs(agent *model.Agent, limit int) ([]dto.JobClaimR
 						}
 					}
 				}
-				aid := agent.ID
-				job.Status = model.JobStatusClaimed
-				job.AgentID = &aid
-				job.ClaimedAt = &now
-				if err := tx.Save(job).Error; err != nil {
-					return err
+				claimed, ok := takePendingJob(tx, job, agent.ID, now)
+				if !ok {
+					continue
 				}
-				out = append(out, dto.JobClaimResult{
-					ID:               job.ID,
-					JobType:          job.JobType,
-					Platform:         job.Platform,
-					PlatformShopID:   job.PlatformShopID,
-					PlatformShopName: job.PlatformShopName,
-					ParamsJSON:       job.ParamsJSON,
-					Source:           job.Source,
-					Priority:         job.Priority,
-				})
+				out = append(out, claimed)
+				break
 			}
 		}
 		return nil
 	})
 	return out, err
+}
+
+func takePendingJob(tx *gorm.DB, job *model.AgentJob, agentID uint64, now time.Time) (dto.JobClaimResult, bool) {
+	if job.AttemptCount >= maxJobAttempts {
+		return dto.JobClaimResult{}, false
+	}
+	aid := agentID
+	job.Status = model.JobStatusClaimed
+	job.AgentID = &aid
+	job.ClaimedAt = &now
+	job.StartedAt = nil
+	job.FinishedAt = nil
+	job.AttemptCount++
+	if err := tx.Save(job).Error; err != nil {
+		return dto.JobClaimResult{}, false
+	}
+	return dto.JobClaimResult{
+		ID:               job.ID,
+		JobType:          job.JobType,
+		Platform:         job.Platform,
+		PlatformShopID:   job.PlatformShopID,
+		PlatformShopName: job.PlatformShopName,
+		ParamsJSON:       job.ParamsJSON,
+		Source:           job.Source,
+		Priority:         job.Priority,
+	}, true
 }
 
 func (s *AgentService) ReportJob(agent *model.Agent, jobID uint64, in *dto.JobReportInput) error {
@@ -382,6 +406,9 @@ func (s *AgentService) ReportJob(agent *model.Agent, jobID uint64, in *dto.JobRe
 		job.ErrorMessage = ""
 		job.FinishedAt = &now
 	case model.JobStatusFailed:
+		if in.Retryable && job.AttemptCount < maxJobAttempts && (job.TargetAgentID == nil || *job.TargetAgentID == 0) {
+			return s.requeueJob(&job, strings.TrimSpace(in.ErrorMessage))
+		}
 		job.Status = model.JobStatusFailed
 		job.ErrorMessage = strings.TrimSpace(in.ErrorMessage)
 		job.ResultJSON = in.ResultJSON
@@ -390,6 +417,64 @@ func (s *AgentService) ReportJob(agent *model.Agent, jobID uint64, in *dto.JobRe
 		return fmt.Errorf("%w: status 仅支持 running/succeeded/failed", ErrBadRequest)
 	}
 	return s.repos.DB.Save(&job).Error
+}
+
+func (s *AgentService) requeueJob(job *model.AgentJob, reason string) error {
+	now := time.Now()
+	msg := strings.TrimSpace(reason)
+	if msg == "" {
+		msg = "等待其他在线机器重试"
+	}
+	updates := map[string]any{
+		"status":        model.JobStatusPending,
+		"agent_id":      nil,
+		"claimed_at":    nil,
+		"started_at":    nil,
+		"finished_at":   nil,
+		"result_json":   "",
+		"error_message": msg,
+		"updated_at":    now,
+	}
+	if job.AgentID != nil && *job.AgentID > 0 {
+		updates["last_agent_id"] = *job.AgentID
+	}
+	return s.repos.DB.Model(job).Updates(updates).Error
+}
+
+func (s *AgentService) otherOnlineCapableAgent(tx *gorm.DB, exceptAgentID uint64, shop model.AgentShop, jobType string) bool {
+	var peers []model.AgentShop
+	if err := tx.Where(
+		"agent_id <> ? AND tenant_id = ? AND platform = ? AND platform_shop_id = ? AND status = ?",
+		exceptAgentID, shop.TenantID, shop.Platform, shop.PlatformShopID, model.ShopStatusActive,
+	).Find(&peers).Error; err != nil {
+		return false
+	}
+	for _, p := range peers {
+		if !hasSkill(parseSkills(p.CapabilitiesJSON), jobType) {
+			continue
+		}
+		var ag model.Agent
+		if err := tx.Select("id", "status", "last_heartbeat").First(&ag, p.AgentID).Error; err != nil {
+			continue
+		}
+		if ag.Status != model.AgentStatusOnline {
+			continue
+		}
+		if ag.LastHeartbeat == nil || time.Since(*ag.LastHeartbeat) > onlineWithin {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func hasSkill(skills []string, jobType string) bool {
+	for _, s := range skills {
+		if s == jobType {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *AgentService) CreateJob(tenantID, userID uint64, in *dto.CreateJobInput) (*model.AgentJob, error) {
@@ -1192,47 +1277,53 @@ func (s *AgentService) CleanupOldJobs(retentionDays int) (int64, error) {
 	return res.RowsAffected, res.Error
 }
 
-// RecoverStaleInFlightJobs 将长时间卡在 claimed/running 的任务标为 failed。
-// claimed 以 claimed_at 为准；running 以 started_at（空则 claimed_at/updated_at）为准。
+// RecoverStaleInFlightJobs 将长时间卡在 claimed/running 的任务放回 pending，让其他在线机器重试。
+// 领取次数达到上限则标 failed。claimed 以 claimed_at 为准；running 以 started_at（空则 claimed_at/updated_at）为准。
 func (s *AgentService) RecoverStaleInFlightJobs(staleMinutes int) (int64, error) {
 	if staleMinutes <= 0 {
 		staleMinutes = 60
 	}
 	cutoff := time.Now().Add(-time.Duration(staleMinutes) * time.Minute)
 	now := time.Now()
-	msg := fmt.Sprintf("超时未完成（>%d 分钟），中心自动回收", staleMinutes)
 
-	var total int64
-	resClaimed := s.repos.DB.Model(&model.AgentJob{}).
-		Where("status = ? AND claimed_at IS NOT NULL AND claimed_at < ?", model.JobStatusClaimed, cutoff).
-		Updates(map[string]interface{}{
-			"status":        model.JobStatusFailed,
-			"finished_at":   now,
-			"error_message": msg,
-			"updated_at":    now,
-		})
-	if resClaimed.Error != nil {
-		return total, resClaimed.Error
+	var stale []model.AgentJob
+	if err := s.repos.DB.Where(
+		"(status = ? AND claimed_at IS NOT NULL AND claimed_at < ?) OR (status = ? AND ((started_at IS NOT NULL AND started_at < ?) OR (started_at IS NULL AND claimed_at IS NOT NULL AND claimed_at < ?) OR (started_at IS NULL AND claimed_at IS NULL AND updated_at < ?)))",
+		model.JobStatusClaimed, cutoff,
+		model.JobStatusRunning, cutoff, cutoff, cutoff,
+	).Find(&stale).Error; err != nil {
+		return 0, err
 	}
-	total += resClaimed.RowsAffected
 
-	// running：优先 started_at；若空则用 claimed_at / updated_at
-	resRunning := s.repos.DB.Model(&model.AgentJob{}).
-		Where(
-			"status = ? AND ((started_at IS NOT NULL AND started_at < ?) OR (started_at IS NULL AND claimed_at IS NOT NULL AND claimed_at < ?) OR (started_at IS NULL AND claimed_at IS NULL AND updated_at < ?))",
-			model.JobStatusRunning, cutoff, cutoff, cutoff,
-		).
-		Updates(map[string]interface{}{
-			"status":        model.JobStatusFailed,
-			"finished_at":   now,
-			"error_message": msg,
-			"updated_at":    now,
-		})
-	if resRunning.Error != nil {
-		return total, resRunning.Error
+	var n int64
+	for i := range stale {
+		job := &stale[i]
+		if job.TargetAgentID != nil && *job.TargetAgentID > 0 {
+			job.Status = model.JobStatusFailed
+			job.FinishedAt = &now
+			job.ErrorMessage = fmt.Sprintf("超时未完成（>%d 分钟），指定机任务不换机", staleMinutes)
+			if err := s.repos.DB.Save(job).Error; err != nil {
+				return n, err
+			}
+			n++
+			continue
+		}
+		if job.AttemptCount >= maxJobAttempts {
+			job.Status = model.JobStatusFailed
+			job.FinishedAt = &now
+			job.ErrorMessage = fmt.Sprintf("超时未完成（>%d 分钟），已重试 %d 次", staleMinutes, job.AttemptCount)
+			if err := s.repos.DB.Save(job).Error; err != nil {
+				return n, err
+			}
+			n++
+			continue
+		}
+		if err := s.requeueJob(job, fmt.Sprintf("超时未完成（>%d 分钟），等待其他在线机器", staleMinutes)); err != nil {
+			return n, err
+		}
+		n++
 	}
-	total += resRunning.RowsAffected
-	return total, nil
+	return n, nil
 }
 
 func (s *AgentService) refreshOfflineAgents() {

@@ -56,6 +56,8 @@ type JobReportInput struct {
 	Status       string `json:"status" binding:"required"` // running/succeeded/failed
 	ResultJSON   string `json:"resultJson"`
 	ErrorMessage string `json:"errorMessage"`
+	// Retryable 为 true 时 failed 会回到 pending，让其他在线且勾了该能力的机器再领（有次数上限）。
+	Retryable bool `json:"retryable"`
 }
 
 type CreateJobInput struct {

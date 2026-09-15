@@ -45,7 +45,7 @@ func (s *StaleJobScheduler) loop() {
 			if err != nil {
 				log.Printf("[job-stale] recover failed: %v", err)
 			} else if n > 0 {
-				log.Printf("[job-stale] failed %d stale claimed/running job(s) older than %d minute(s)", n, s.staleMinutes)
+				log.Printf("[job-stale] requeued %d stale claimed/running job(s) older than %d minute(s)", n, s.staleMinutes)
 			}
 			timer.Reset(2 * time.Minute)
 		}
