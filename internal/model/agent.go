@@ -88,10 +88,12 @@ const (
 	JobTypeDoudianAftersale     = "doudian.aftersale"
 	JobTypeDoudianDecryptPhone  = "doudian.order.decrypt-phone"
 	JobTypeKdzsRemotePrint      = "kdzs.remote.print"
+	JobTypeDoudianCsMonitor     = "doudian.cs.monitor"
 
 	RunPolicyInterval = "interval"
 	RunPolicyOnDemand = "on_demand"
 	RunPolicyDaily    = "daily" // reserved
+	RunPolicyDaemon   = "daemon" // 常开守护，不依赖 interval 抢任务
 )
 
 // TaskAssignment 店铺 × 技能的长期订阅（运行周期）；每次下发仍创建 AgentJob 执行单。

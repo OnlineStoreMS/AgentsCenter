@@ -882,6 +882,13 @@ func (s *AgentService) SkillCatalog() []dto.SkillCatalogItem {
 			Description: "快递助手桌面端远程打单（Shipping 下发）",
 			RunPolicies: []string{model.RunPolicyOnDemand},
 		},
+		{
+			ID:          model.JobTypeDoudianCsMonitor,
+			Name:        "抖店客服常开监听",
+			Platform:    model.PlatformDoudian,
+			Description: "WindowsAgent 常开守护：保持飞鸽页并增量上报消息到客服中心（不依赖 interval 抢任务）",
+			RunPolicies: []string{model.RunPolicyDaemon},
+		},
 	}
 }
 
@@ -974,6 +981,8 @@ func (s *AgentService) UpsertAssignment(tenantID, userID uint64, in *dto.UpsertA
 	if runPolicy == "" {
 		if skillSupports(sk, model.RunPolicyInterval) {
 			runPolicy = model.RunPolicyInterval
+		} else if skillSupports(sk, model.RunPolicyDaemon) {
+			runPolicy = model.RunPolicyDaemon
 		} else {
 			runPolicy = model.RunPolicyOnDemand
 		}
