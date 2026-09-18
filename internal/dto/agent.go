@@ -133,6 +133,7 @@ type JobListItem struct {
 	AgentID          *uint64 `json:"agentId"`
 	AgentName        string  `json:"agentName"`
 	ErrorMessage     string  `json:"errorMessage"`
+	ResultJSON       string  `json:"resultJson,omitempty"`
 	CreatedAt        string  `json:"createdAt"`
 	StartedAt        *string `json:"startedAt"`
 	FinishedAt       *string `json:"finishedAt"`

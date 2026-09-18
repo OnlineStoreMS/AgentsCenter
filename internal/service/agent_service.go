@@ -867,6 +867,7 @@ func (s *AgentService) GetJobsByIDs(tenantID uint64, ids []uint64) ([]dto.JobLis
 			Status:           j.Status,
 			AgentID:          j.AgentID,
 			ErrorMessage:     j.ErrorMessage,
+			ResultJSON:       j.ResultJSON,
 			CreatedAt:        j.CreatedAt.Format(time.RFC3339),
 		}
 		if j.ClaimedAt != nil {
@@ -922,6 +923,7 @@ func (s *AgentService) ListJobs(tenantID uint64, page, pageSize int, status, job
 			Status:           j.Status,
 			AgentID:          j.AgentID,
 			ErrorMessage:     j.ErrorMessage,
+			ResultJSON:       j.ResultJSON,
 			CreatedAt:        j.CreatedAt.Format(time.RFC3339),
 		}
 		if j.AgentID != nil {
