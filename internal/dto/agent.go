@@ -83,6 +83,16 @@ type InternalCreateJobInput struct {
 	TargetAgentID    *uint64 `json:"targetAgentId"`
 }
 
+type InternalUpdatePendingJobInput struct {
+	TenantID   uint64 `json:"tenantId" binding:"required"`
+	ParamsJSON string `json:"paramsJson" binding:"required"`
+}
+
+type InternalCancelPendingJobInput struct {
+	TenantID uint64 `json:"tenantId" binding:"required"`
+	Reason   string `json:"reason"`
+}
+
 type AgentListItem struct {
 	ID            uint64           `json:"id"`
 	MachineID     string           `json:"machineId"`

@@ -59,6 +59,8 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	internalGroup := v1.Group("/internal")
 	internalGroup.Use(internalH.AuthRequired())
 	internalGroup.POST("/jobs", internalH.CreateJob)
+	internalGroup.PATCH("/jobs/:id", internalH.UpdatePendingJob)
+	internalGroup.POST("/jobs/:id/cancel", internalH.CancelPendingJob)
 	internalGroup.GET("/jobs", internalH.GetJobs)
 	internalGroup.GET("/agents", internalH.ListAgents)
 	internalGroup.GET("/shops", internalH.ListShops)

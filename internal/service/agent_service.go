@@ -559,6 +559,92 @@ func (s *AgentService) CreateJob(tenantID, userID uint64, in *dto.CreateJobInput
 	return &job, nil
 }
 
+// UpdatePendingJobParams 仅允许改写仍排队中的执行单参数（供发货中心合并同类远程打单）。
+func (s *AgentService) UpdatePendingJobParams(tenantID, jobID uint64, paramsJSON string) (*model.AgentJob, error) {
+	if jobID == 0 {
+		return nil, fmt.Errorf("%w: jobId 必填", ErrBadRequest)
+	}
+	paramsJSON = strings.TrimSpace(paramsJSON)
+	if paramsJSON == "" {
+		return nil, fmt.Errorf("%w: paramsJson 必填", ErrBadRequest)
+	}
+	var probe map[string]any
+	if err := json.Unmarshal([]byte(paramsJSON), &probe); err != nil {
+		return nil, fmt.Errorf("%w: paramsJson 非法", ErrBadRequest)
+	}
+	var job model.AgentJob
+	err := s.repos.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND tenant_id = ?", jobID, tenantID).
+			First(&job).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return ErrNotFound
+			}
+			return err
+		}
+		if job.Status != model.JobStatusPending {
+			return fmt.Errorf("%w: 任务已开始或结束，无法更新参数", ErrBadRequest)
+		}
+		now := time.Now()
+		if err := tx.Model(&job).Updates(map[string]any{
+			"params_json": paramsJSON,
+			"updated_at":  now,
+		}).Error; err != nil {
+			return err
+		}
+		job.ParamsJSON = paramsJSON
+		job.UpdatedAt = now
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &job, nil
+}
+
+// CancelPendingJob 取消仍排队中的执行单（合并进批量后丢弃重复任务）。
+func (s *AgentService) CancelPendingJob(tenantID, jobID uint64, reason string) (*model.AgentJob, error) {
+	if jobID == 0 {
+		return nil, fmt.Errorf("%w: jobId 必填", ErrBadRequest)
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "已取消"
+	}
+	var job model.AgentJob
+	err := s.repos.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND tenant_id = ?", jobID, tenantID).
+			First(&job).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return ErrNotFound
+			}
+			return err
+		}
+		if job.Status != model.JobStatusPending {
+			return fmt.Errorf("%w: 任务已开始或结束，无法取消", ErrBadRequest)
+		}
+		now := time.Now()
+		if err := tx.Model(&job).Updates(map[string]any{
+			"status":        model.JobStatusCancelled,
+			"error_message": reason,
+			"finished_at":   now,
+			"updated_at":    now,
+		}).Error; err != nil {
+			return err
+		}
+		job.Status = model.JobStatusCancelled
+		job.ErrorMessage = reason
+		job.FinishedAt = &now
+		job.UpdatedAt = now
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &job, nil
+}
+
 // findPendingJob 查找尚未领取的执行单（用于参数同步等，不用于「立即执行」复用）。
 func (s *AgentService) findPendingJob(tenantID uint64, jobType, platform, shopID string) (*model.AgentJob, error) {
 	var job model.AgentJob

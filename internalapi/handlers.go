@@ -57,6 +57,44 @@ func (h *Handler) CreateJob(c *gin.Context) {
 	response.Created(c, job)
 }
 
+func (h *Handler) UpdatePendingJob(c *gin.Context) {
+	id, err := httputil.ParseID(c)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var in dto.InternalUpdatePendingJobInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	job, err := h.svc.UpdatePendingJobParams(in.TenantID, id, in.ParamsJSON)
+	if err != nil {
+		httputil.HandleServiceError(c, err)
+		return
+	}
+	response.OK(c, job)
+}
+
+func (h *Handler) CancelPendingJob(c *gin.Context) {
+	id, err := httputil.ParseID(c)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var in dto.InternalCancelPendingJobInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	job, err := h.svc.CancelPendingJob(in.TenantID, id, in.Reason)
+	if err != nil {
+		httputil.HandleServiceError(c, err)
+		return
+	}
+	response.OK(c, job)
+}
+
 func (h *Handler) GetJobs(c *gin.Context) {
 	tenantID, _ := strconv.ParseUint(c.Query("tenantId"), 10, 64)
 	raw := strings.TrimSpace(c.Query("ids"))
