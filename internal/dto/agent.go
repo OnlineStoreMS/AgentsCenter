@@ -27,18 +27,27 @@ type AgentShopReport struct {
 	Status           string   `json:"status"`
 }
 
+type AgentCapabilityReport struct {
+	TenantID     uint64 `json:"tenantId"`
+	SkillID      string `json:"skillId"`
+	Name         string `json:"name"`
+	Enabled      bool   `json:"enabled"`
+	SettingsJSON string `json:"settingsJson"`
+}
+
 type AgentHeartbeatInput struct {
-	Hostname     string            `json:"hostname"`
-	OS           string            `json:"os"`
-	AgentVersion string            `json:"agentVersion"`
-	Skills       []string          `json:"skills"`
-	Shops        []AgentShopReport `json:"shops"`
+	Hostname     string                  `json:"hostname"`
+	OS           string                  `json:"os"`
+	AgentVersion string                  `json:"agentVersion"`
+	Skills       []string                `json:"skills"`
+	Shops        []AgentShopReport       `json:"shops"`
+	Capabilities []AgentCapabilityReport `json:"capabilities"`
 }
 
 type AgentHeartbeatResult struct {
-	ServerTime       string `json:"serverTime"`
-	PendingJobs      int64  `json:"pendingJobs"`
-	HeartbeatInterval int   `json:"heartbeatIntervalSec"`
+	ServerTime        string `json:"serverTime"`
+	PendingJobs       int64  `json:"pendingJobs"`
+	HeartbeatInterval int    `json:"heartbeatIntervalSec"`
 }
 
 type JobClaimResult struct {
@@ -154,6 +163,7 @@ type SkillCatalogItem struct {
 	Name                   string   `json:"name"`
 	Platform               string   `json:"platform"`
 	Description            string   `json:"description"`
+	Scope                  string   `json:"scope"` // shop | machine
 	RunPolicies            []string `json:"runPolicies"`
 	DefaultIntervalMinutes int      `json:"defaultIntervalMinutes,omitempty"`
 }

@@ -149,6 +149,11 @@ func (s *AgentService) Heartbeat(agent *model.Agent, in *dto.AgentHeartbeatInput
 			return nil, err
 		}
 	}
+	if in != nil && in.Capabilities != nil {
+		if err := s.upsertCapabilities(agent, in.Capabilities, now); err != nil {
+			return nil, err
+		}
+	}
 
 	var shops []model.AgentShop
 	_ = s.repos.DB.Where("agent_id = ? AND status = ?", agent.ID, model.ShopStatusActive).Find(&shops).Error
@@ -239,6 +244,69 @@ func (s *AgentService) upsertShops(agent *model.Agent, shops []dto.AgentShopRepo
 			k := all[i].Platform + "|" + all[i].PlatformShopID
 			if _, ok := seen[k]; !ok && all[i].Status == model.ShopStatusActive {
 				_ = tx.Model(&all[i]).Update("status", model.ShopStatusInactive).Error
+			}
+		}
+		return nil
+	})
+}
+
+func (s *AgentService) upsertCapabilities(agent *model.Agent, caps []dto.AgentCapabilityReport, now time.Time) error {
+	seen := make(map[string]struct{}, len(caps))
+	return s.repos.DB.Transaction(func(tx *gorm.DB) error {
+		for _, cap := range caps {
+			skillID := strings.TrimSpace(cap.SkillID)
+			if cap.TenantID == 0 || skillID == "" {
+				continue
+			}
+			key := fmt.Sprintf("%d|%s", cap.TenantID, skillID)
+			seen[key] = struct{}{}
+			status := model.ShopStatusActive
+			enabled := cap.Enabled
+			if !enabled {
+				status = model.ShopStatusInactive
+			}
+			var row model.AgentCapability
+			err := tx.Where("agent_id = ? AND tenant_id = ? AND skill_id = ?", agent.ID, cap.TenantID, skillID).
+				First(&row).Error
+			if err == gorm.ErrRecordNotFound {
+				row = model.AgentCapability{
+					AgentID:      agent.ID,
+					TenantID:     cap.TenantID,
+					SkillID:      skillID,
+					Name:         strings.TrimSpace(cap.Name),
+					Enabled:      enabled,
+					SettingsJSON: cap.SettingsJSON,
+					Status:       status,
+					LastSeenAt:   &now,
+				}
+				if err := tx.Create(&row).Error; err != nil {
+					return err
+				}
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			row.Name = strings.TrimSpace(cap.Name)
+			row.Enabled = enabled
+			row.SettingsJSON = cap.SettingsJSON
+			row.Status = status
+			row.LastSeenAt = &now
+			if err := tx.Save(&row).Error; err != nil {
+				return err
+			}
+		}
+		var all []model.AgentCapability
+		if err := tx.Where("agent_id = ?", agent.ID).Find(&all).Error; err != nil {
+			return err
+		}
+		for i := range all {
+			k := fmt.Sprintf("%d|%s", all[i].TenantID, all[i].SkillID)
+			if _, ok := seen[k]; !ok && all[i].Status == model.ShopStatusActive {
+				_ = tx.Model(&all[i]).Updates(map[string]any{
+					"status":  model.ShopStatusInactive,
+					"enabled": false,
+				}).Error
 			}
 		}
 		return nil
@@ -788,10 +856,26 @@ func (s *AgentService) ListAgentsFiltered(tenantID uint64, page, pageSize int, o
 	skill = strings.TrimSpace(skill)
 
 	var rows []model.Agent
-	q := s.repos.DB.Model(&model.Agent{}).Where(
-		"id IN (SELECT DISTINCT agent_id FROM agent_shops WHERE tenant_id = ? AND status = ?)",
-		tenantID, model.ShopStatusActive,
-	)
+	var q *gorm.DB
+	machineSkill := skill != "" && s.skillScope(skill) == model.CapabilityScopeMachine
+	if machineSkill {
+		var agentIDs []uint64
+		if err := s.repos.DB.Model(&model.AgentCapability{}).
+			Where("tenant_id = ? AND skill_id = ? AND enabled = ? AND status = ?",
+				tenantID, skill, true, model.ShopStatusActive).
+			Pluck("agent_id", &agentIDs).Error; err != nil {
+			return nil, 0, err
+		}
+		if len(agentIDs) == 0 {
+			return []dto.AgentListItem{}, 0, nil
+		}
+		q = s.repos.DB.Model(&model.Agent{}).Where("id IN ?", agentIDs)
+	} else {
+		q = s.repos.DB.Model(&model.Agent{}).Where(
+			"id IN (SELECT DISTINCT agent_id FROM agent_shops WHERE tenant_id = ? AND status = ?)",
+			tenantID, model.ShopStatusActive,
+		)
+	}
 	if onlineOnly {
 		q = q.Where("status = ?", model.AgentStatusOnline)
 	}
@@ -801,7 +885,7 @@ func (s *AgentService) ListAgentsFiltered(tenantID uint64, page, pageSize int, o
 
 	filtered := make([]model.Agent, 0, len(rows))
 	for _, a := range rows {
-		if skill != "" {
+		if skill != "" && !machineSkill {
 			ok := false
 			for _, sk := range parseSkills(a.SkillsJSON) {
 				if sk == skill {
@@ -1037,6 +1121,7 @@ func (s *AgentService) SkillCatalog() []dto.SkillCatalogItem {
 			ID:                     model.JobTypeDoudianAftersale,
 			Name:                   "抖店售后单抓取",
 			Platform:               model.PlatformDoudian,
+			Scope:                  model.CapabilityScopeShop,
 			Description:            "抓取抖店售后工作台；上报地址与凭证由售后中心创建任务时写入 params",
 			RunPolicies:            []string{model.RunPolicyInterval, model.RunPolicyOnDemand},
 			DefaultIntervalMinutes: 30,
@@ -1045,6 +1130,7 @@ func (s *AgentService) SkillCatalog() []dto.SkillCatalogItem {
 			ID:          model.JobTypeDoudianDecryptPhone,
 			Name:        "抖店订单解密真实手机号",
 			Platform:    model.PlatformDoudian,
+			Scope:       model.CapabilityScopeShop,
 			Description: "在已登录抖店后台申请查看真实收件手机号",
 			RunPolicies: []string{model.RunPolicyOnDemand},
 		},
@@ -1052,6 +1138,7 @@ func (s *AgentService) SkillCatalog() []dto.SkillCatalogItem {
 			ID:          model.JobTypeKdzsRemotePrint,
 			Name:        "快递助手远程打单",
 			Platform:    model.PlatformDoudian,
+			Scope:       model.CapabilityScopeShop,
 			Description: "快递助手桌面端远程打单（Shipping 下发）",
 			RunPolicies: []string{model.RunPolicyOnDemand},
 		},
@@ -1059,6 +1146,7 @@ func (s *AgentService) SkillCatalog() []dto.SkillCatalogItem {
 			ID:          model.JobTypeDoudianCsMonitor,
 			Name:        "抖店客服常开监听",
 			Platform:    model.PlatformDoudian,
+			Scope:       model.CapabilityScopeShop,
 			Description: "WindowsAgent 常开守护：保持飞鸽页并增量上报消息到客服中心（不依赖 interval 抢任务）",
 			RunPolicies: []string{model.RunPolicyDaemon},
 		},
@@ -1066,10 +1154,19 @@ func (s *AgentService) SkillCatalog() []dto.SkillCatalogItem {
 			ID:          model.JobTypeEcommerceProductCollect,
 			Name:        "电商商品采集",
 			Platform:    model.PlatformTaobao,
-			Description: "商品中心下发商品链接，WindowsAgent 用固定 Chrome 116 打开并采集（当前主要支持淘宝/天猫）",
+			Scope:       model.CapabilityScopeMachine,
+			Description: "在 WindowsAgent「本机能力」中新建。商品中心只把链接发给启用了该能力的电脑，浏览器按该能力的配置打开。",
 			RunPolicies: []string{model.RunPolicyOnDemand},
 		},
 	}
+}
+
+func (s *AgentService) skillScope(id string) string {
+	sk := s.skillByID(id)
+	if sk != nil && sk.Scope == model.CapabilityScopeMachine {
+		return model.CapabilityScopeMachine
+	}
+	return model.CapabilityScopeShop
 }
 
 func (s *AgentService) skillByID(id string) *dto.SkillCatalogItem {

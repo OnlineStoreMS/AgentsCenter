@@ -36,6 +36,7 @@ func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&model.Agent{},
 		&model.AgentShop{},
+		&model.AgentCapability{},
 		&model.AgentJob{},
 		&model.TaskAssignment{},
 	)

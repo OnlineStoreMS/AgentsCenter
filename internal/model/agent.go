@@ -40,6 +40,23 @@ type AgentShop struct {
 
 func (AgentShop) TableName() string { return "agent_shops" }
 
+// AgentCapability 本机能力（不绑定电商店铺）。由 WindowsAgent「本机能力」上报。
+type AgentCapability struct {
+	ID           uint64     `gorm:"primaryKey" json:"id"`
+	AgentID      uint64     `gorm:"uniqueIndex:uniq_agent_cap;not null" json:"agentId"`
+	TenantID     uint64     `gorm:"uniqueIndex:uniq_agent_cap;not null" json:"tenantId"`
+	SkillID      string     `gorm:"size:64;uniqueIndex:uniq_agent_cap;not null" json:"skillId"`
+	Name         string     `gorm:"size:128" json:"name"`
+	Enabled      bool       `gorm:"not null;default:true" json:"enabled"`
+	SettingsJSON string     `gorm:"type:text" json:"settingsJson"`
+	Status       string     `gorm:"size:16;not null;default:active" json:"status"`
+	LastSeenAt   *time.Time `json:"lastSeenAt"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+}
+
+func (AgentCapability) TableName() string { return "agent_capabilities" }
+
 // AgentJob 业务中心提交的任务；中心按店铺匹配在线 Agent 后下发。
 type AgentJob struct {
 	ID               uint64 `gorm:"primaryKey" json:"id"`
@@ -97,8 +114,11 @@ const (
 
 	RunPolicyInterval = "interval"
 	RunPolicyOnDemand = "on_demand"
-	RunPolicyDaily    = "daily"  // reserved
-	RunPolicyDaemon   = "daemon" // 常开守护，不依赖 interval 抢任务
+
+	CapabilityScopeShop    = "shop"
+	CapabilityScopeMachine = "machine"
+	RunPolicyDaily         = "daily"  // reserved
+	RunPolicyDaemon        = "daemon" // 常开守护，不依赖 interval 抢任务
 )
 
 // TaskAssignment 店铺 × 技能的长期订阅（运行周期）；每次下发仍创建 AgentJob 执行单。
