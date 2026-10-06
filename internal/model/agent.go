@@ -110,7 +110,6 @@ const (
 	JobTypeDoudianDecryptPhone     = "doudian.order.decrypt-phone"
 	JobTypeKdzsRemotePrint         = "kdzs.remote.print"
 	JobTypeDoudianCsMonitor        = "doudian.cs.monitor"
-	JobTypeEcommerceProductCollect = "ecommerce.product.collect"
 
 	RunPolicyInterval = "interval"
 	RunPolicyOnDemand = "on_demand"

@@ -1150,14 +1150,6 @@ func (s *AgentService) SkillCatalog() []dto.SkillCatalogItem {
 			Description: "WindowsAgent 常开守护：保持飞鸽页并增量上报消息到客服中心（不依赖 interval 抢任务）",
 			RunPolicies: []string{model.RunPolicyDaemon},
 		},
-		{
-			ID:          model.JobTypeEcommerceProductCollect,
-			Name:        "电商商品采集",
-			Platform:    model.PlatformTaobao,
-			Scope:       model.CapabilityScopeMachine,
-			Description: "在 WindowsAgent「本机能力」中新建。商品中心只把链接发给启用了该能力的电脑，浏览器按该能力的配置打开。",
-			RunPolicies: []string{model.RunPolicyOnDemand},
-		},
 	}
 }
 
