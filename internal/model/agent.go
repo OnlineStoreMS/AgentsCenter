@@ -14,7 +14,7 @@ type Agent struct {
 	AgentKey      string     `gorm:"size:64;uniqueIndex;not null" json:"agentKey"`
 	AgentSecret   string     `gorm:"size:128;not null" json:"-"`
 	Status        string     `gorm:"size:16;index;not null;default:offline" json:"status"` // online/offline
-	SkillsJSON    string     `gorm:"type:text" json:"skillsJson"`                         // 本机支持的 skill id 列表 JSON
+	SkillsJSON    string     `gorm:"type:text" json:"skillsJson"`                          // 本机支持的 skill id 列表 JSON
 	LastHeartbeat *time.Time `json:"lastHeartbeat"`
 	CreatedAt     time.Time  `json:"createdAt"`
 	UpdatedAt     time.Time  `json:"updatedAt"`
@@ -42,31 +42,31 @@ func (AgentShop) TableName() string { return "agent_shops" }
 
 // AgentJob 业务中心提交的任务；中心按店铺匹配在线 Agent 后下发。
 type AgentJob struct {
-	ID               uint64     `gorm:"primaryKey" json:"id"`
-	TenantID         uint64     `gorm:"index;not null;default:1" json:"tenantId"`
-	JobType          string     `gorm:"size:64;index;not null" json:"jobType"` // skill id
-	Platform         string     `gorm:"size:32;index;not null" json:"platform"`
-	PlatformShopID   string     `gorm:"size:128;index;not null" json:"platformShopId"`
-	PlatformShopName string     `gorm:"size:256" json:"platformShopName"`
-	ParamsJSON       string     `gorm:"type:text" json:"paramsJson"`
-	Source           string     `gorm:"size:64" json:"source"` // aftersales/order/product/manual
-	Priority         int        `gorm:"not null;default:100" json:"priority"`
-	Status           string     `gorm:"size:16;index;not null;default:pending" json:"status"`
+	ID               uint64 `gorm:"primaryKey" json:"id"`
+	TenantID         uint64 `gorm:"index;not null;default:1" json:"tenantId"`
+	JobType          string `gorm:"size:64;index;not null" json:"jobType"` // skill id
+	Platform         string `gorm:"size:32;index;not null" json:"platform"`
+	PlatformShopID   string `gorm:"size:128;index;not null" json:"platformShopId"`
+	PlatformShopName string `gorm:"size:256" json:"platformShopName"`
+	ParamsJSON       string `gorm:"type:text" json:"paramsJson"`
+	Source           string `gorm:"size:64" json:"source"` // aftersales/order/product/manual
+	Priority         int    `gorm:"not null;default:100" json:"priority"`
+	Status           string `gorm:"size:16;index;not null;default:pending" json:"status"`
 	// TargetAgentID 指定执行机（如快递助手远程打单）；非空时仅该 Agent 可领取，不按店铺匹配。
-	TargetAgentID    *uint64    `gorm:"index" json:"targetAgentId,omitempty"`
-	AgentID          *uint64    `gorm:"index" json:"agentId"`
+	TargetAgentID *uint64 `gorm:"index" json:"targetAgentId,omitempty"`
+	AgentID       *uint64 `gorm:"index" json:"agentId"`
 	// LastAgentID 上次领取失败/超时的机器；有其他在线同店同能力机器时优先换机。
-	LastAgentID      *uint64    `gorm:"index" json:"lastAgentId,omitempty"`
+	LastAgentID *uint64 `gorm:"index" json:"lastAgentId,omitempty"`
 	// AttemptCount 被机器领取的次数；超时回收或可重试失败后回到 pending，超过上限则失败。
-	AttemptCount     int        `gorm:"not null;default:0" json:"attemptCount"`
-	ClaimedAt        *time.Time `json:"claimedAt"`
-	StartedAt        *time.Time `json:"startedAt"`
-	FinishedAt       *time.Time `json:"finishedAt"`
-	ResultJSON       string     `gorm:"type:text" json:"resultJson"`
-	ErrorMessage     string     `gorm:"type:text" json:"errorMessage"`
-	CreatedBy        uint64     `json:"createdBy"`
-	CreatedAt        time.Time  `json:"createdAt"`
-	UpdatedAt        time.Time  `json:"updatedAt"`
+	AttemptCount int        `gorm:"not null;default:0" json:"attemptCount"`
+	ClaimedAt    *time.Time `json:"claimedAt"`
+	StartedAt    *time.Time `json:"startedAt"`
+	FinishedAt   *time.Time `json:"finishedAt"`
+	ResultJSON   string     `gorm:"type:text" json:"resultJson"`
+	ErrorMessage string     `gorm:"type:text" json:"errorMessage"`
+	CreatedBy    uint64     `json:"createdBy"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
 }
 
 func (AgentJob) TableName() string { return "agent_jobs" }
@@ -89,14 +89,15 @@ const (
 	PlatformTaobao  = "taobao"
 	PlatformPdd     = "pdd"
 
-	JobTypeDoudianAftersale     = "doudian.aftersale"
-	JobTypeDoudianDecryptPhone  = "doudian.order.decrypt-phone"
-	JobTypeKdzsRemotePrint      = "kdzs.remote.print"
-	JobTypeDoudianCsMonitor     = "doudian.cs.monitor"
+	JobTypeDoudianAftersale        = "doudian.aftersale"
+	JobTypeDoudianDecryptPhone     = "doudian.order.decrypt-phone"
+	JobTypeKdzsRemotePrint         = "kdzs.remote.print"
+	JobTypeDoudianCsMonitor        = "doudian.cs.monitor"
+	JobTypeEcommerceProductCollect = "ecommerce.product.collect"
 
 	RunPolicyInterval = "interval"
 	RunPolicyOnDemand = "on_demand"
-	RunPolicyDaily    = "daily" // reserved
+	RunPolicyDaily    = "daily"  // reserved
 	RunPolicyDaemon   = "daemon" // 常开守护，不依赖 interval 抢任务
 )
 

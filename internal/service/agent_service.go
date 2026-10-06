@@ -1037,7 +1037,7 @@ func (s *AgentService) SkillCatalog() []dto.SkillCatalogItem {
 			ID:                     model.JobTypeDoudianAftersale,
 			Name:                   "抖店售后单抓取",
 			Platform:               model.PlatformDoudian,
-            Description:            "抓取抖店售后工作台；上报地址与凭证由售后中心创建任务时写入 params",
+			Description:            "抓取抖店售后工作台；上报地址与凭证由售后中心创建任务时写入 params",
 			RunPolicies:            []string{model.RunPolicyInterval, model.RunPolicyOnDemand},
 			DefaultIntervalMinutes: 30,
 		},
@@ -1061,6 +1061,13 @@ func (s *AgentService) SkillCatalog() []dto.SkillCatalogItem {
 			Platform:    model.PlatformDoudian,
 			Description: "WindowsAgent 常开守护：保持飞鸽页并增量上报消息到客服中心（不依赖 interval 抢任务）",
 			RunPolicies: []string{model.RunPolicyDaemon},
+		},
+		{
+			ID:          model.JobTypeEcommerceProductCollect,
+			Name:        "电商商品采集",
+			Platform:    model.PlatformTaobao,
+			Description: "商品中心下发商品链接，WindowsAgent 用固定 Chrome 116 打开并采集（当前主要支持淘宝/天猫）",
+			RunPolicies: []string{model.RunPolicyOnDemand},
 		},
 	}
 }
