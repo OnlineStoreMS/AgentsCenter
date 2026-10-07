@@ -1138,8 +1138,8 @@ func (s *AgentService) SkillCatalog() []dto.SkillCatalogItem {
 			ID:          model.JobTypeKdzsRemotePrint,
 			Name:        "快递助手远程打单",
 			Platform:    model.PlatformDoudian,
-			Scope:       model.CapabilityScopeShop,
-			Description: "快递助手桌面端远程打单（Shipping 下发）",
+			Scope:       model.CapabilityScopeMachine,
+			Description: "快递助手桌面端远程打单（WindowsAgent「本机能力」，Shipping 下发）",
 			RunPolicies: []string{model.RunPolicyOnDemand},
 		},
 		{
