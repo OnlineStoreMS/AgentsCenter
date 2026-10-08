@@ -24,10 +24,37 @@ const maxJobAttempts = 3
 type AgentService struct {
 	repos      *repo.Repository
 	aftersales *AfterSalesClient
+	shipping   *ShippingClient
 }
 
-func NewAgentService(repos *repo.Repository, aftersales *AfterSalesClient) *AgentService {
-	return &AgentService{repos: repos, aftersales: aftersales}
+func NewAgentService(repos *repo.Repository, aftersales *AfterSalesClient, shipping *ShippingClient) *AgentService {
+	return &AgentService{repos: repos, aftersales: aftersales, shipping: shipping}
+}
+
+// GetKdzsDefaultLogin 本机已启用快递助手远程打单能力时，返回该租户发货中心默认账号。
+func (s *AgentService) GetKdzsDefaultLogin(agent *model.Agent, tenantID uint64) (*ShippingKdzsLogin, error) {
+	if agent == nil {
+		return nil, ErrAgentAuth
+	}
+	if tenantID == 0 {
+		return nil, fmt.Errorf("%w: tenantId 必填", ErrBadRequest)
+	}
+	var cap model.AgentCapability
+	err := s.repos.DB.Where(
+		"agent_id = ? AND tenant_id = ? AND skill_id = ? AND enabled = ?",
+		agent.ID, tenantID, model.JobTypeKdzsRemotePrint, true,
+	).First(&cap).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, fmt.Errorf("%w: 本机未启用该租户的快递助手远程打单能力", ErrBadRequest)
+		}
+		return nil, err
+	}
+	_ = cap
+	if s.shipping == nil {
+		return nil, fmt.Errorf("%w: Agents 中心未配置发货中心地址", ErrBadRequest)
+	}
+	return s.shipping.FetchDefaultKdzsLogin(tenantID)
 }
 
 func (s *AgentService) Register(tenantID uint64, in *dto.AgentRegisterInput) (*dto.AgentRegisterResult, error) {

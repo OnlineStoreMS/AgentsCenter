@@ -16,6 +16,10 @@ aftersales:
   base_url: "http://localhost:8093"
   internal_token: "change-me-internal-token"
 
+shipping:
+  base_url: "http://localhost:8096"
+  internal_token: "change-me-internal-token"
+
 jobs:
   retention_days: 3
   # claimed/running 超过该分钟未结束则自动标 failed（须大于 WA 整单超时，当前 WA≈45 分钟）

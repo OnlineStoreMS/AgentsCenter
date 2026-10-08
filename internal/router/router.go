@@ -25,7 +25,8 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 
 	repos := repo.New(db)
 	aftersales := service.NewAfterSalesClient(cfg.AfterSales.BaseURL, cfg.AfterSales.InternalToken)
-	svc := service.NewAgentService(repos, aftersales)
+	shipping := service.NewShippingClient(cfg.Shipping.BaseURL, cfg.Shipping.InternalToken)
+	svc := service.NewAgentService(repos, aftersales, shipping)
 	adminH := admin.NewHandlers(svc)
 	agentH := agentapi.NewHandler(svc)
 	internalH := internalapi.NewHandler(svc, cfg.Auth.InternalToken)
@@ -49,6 +50,7 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			authed.POST("/heartbeat", agentH.Heartbeat)
 			authed.GET("/jobs/claim", agentH.ClaimJobs)
 			authed.POST("/jobs/:id/report", agentH.ReportJob)
+			authed.GET("/kdzs-default-login", agentH.KdzsDefaultLogin)
 		}
 	}
 

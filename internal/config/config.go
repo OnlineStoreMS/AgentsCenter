@@ -13,6 +13,7 @@ type Config struct {
 	Auth       AuthConfig
 	CORS       CORSConfig
 	AfterSales AfterSalesConfig `mapstructure:"aftersales"`
+	Shipping   ShippingConfig   `mapstructure:"shipping"`
 	Jobs       JobsConfig       `mapstructure:"jobs"`
 }
 
@@ -34,6 +35,11 @@ type AuthConfig struct {
 }
 
 type AfterSalesConfig struct {
+	BaseURL       string `mapstructure:"base_url"`
+	InternalToken string `mapstructure:"internal_token"`
+}
+
+type ShippingConfig struct {
 	BaseURL       string `mapstructure:"base_url"`
 	InternalToken string `mapstructure:"internal_token"`
 }
@@ -84,6 +90,12 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.AfterSales.InternalToken == "" {
 		cfg.AfterSales.InternalToken = cfg.Auth.InternalToken
+	}
+	if cfg.Shipping.BaseURL == "" {
+		cfg.Shipping.BaseURL = "http://localhost:8096"
+	}
+	if cfg.Shipping.InternalToken == "" {
+		cfg.Shipping.InternalToken = cfg.Auth.InternalToken
 	}
 	if cfg.Jobs.RetentionDays <= 0 {
 		cfg.Jobs.RetentionDays = 3

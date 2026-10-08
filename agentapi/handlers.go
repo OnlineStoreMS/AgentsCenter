@@ -85,6 +85,22 @@ func (h *Handler) ClaimJobs(c *gin.Context) {
 	response.OK(c, items)
 }
 
+// KdzsDefaultLogin GET /api/v1/agent/kdzs-default-login?tenantId=
+func (h *Handler) KdzsDefaultLogin(c *gin.Context) {
+	agent := mustAgent(c)
+	if agent == nil {
+		response.Fail(c, http.StatusUnauthorized, service.ErrAgentAuth.Error())
+		return
+	}
+	tenantID, _ := strconv.ParseUint(strings.TrimSpace(c.Query("tenantId")), 10, 64)
+	item, err := h.svc.GetKdzsDefaultLogin(agent, tenantID)
+	if err != nil {
+		httputil.HandleServiceError(c, err)
+		return
+	}
+	response.OK(c, item)
+}
+
 func (h *Handler) ReportJob(c *gin.Context) {
 	agent := mustAgent(c)
 	if agent == nil {
