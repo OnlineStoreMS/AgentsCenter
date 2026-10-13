@@ -106,11 +106,12 @@ const (
 	PlatformTaobao  = "taobao"
 	PlatformPdd     = "pdd"
 
-	JobTypeDoudianAftersale        = "doudian.aftersale"
-	JobTypeDoudianDecryptPhone     = "doudian.order.decrypt-phone"
-	JobTypeKdzsRemotePrint         = "kdzs.remote.print"
-	JobTypeDoudianCsMonitor        = "doudian.cs.monitor"
-	JobTypeDoudianProductPublish   = "doudian.product.publish"
+	JobTypeDoudianAftersale      = "doudian.aftersale"
+	JobTypeDoudianDecryptPhone   = "doudian.order.decrypt-phone"
+	JobTypeKdzsRemotePrint       = "kdzs.remote.print"
+	JobTypeDoudianCsMonitor      = "doudian.cs.monitor"
+	JobTypeDoudianProductPublish = "doudian.product.publish"
+	JobTypeDoudianProductUpdate  = "doudian.product.update"
 
 	RunPolicyInterval = "interval"
 	RunPolicyOnDemand = "on_demand"
